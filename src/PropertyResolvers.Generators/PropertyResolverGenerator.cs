@@ -150,6 +150,10 @@ public class PropertyResolverGenerator : IIncrementalGenerator
     {
         foreach (var type in ns.GetTypeMembers())
         {
+            // Skip generic types - they cannot be pattern-matched in switch expressions
+            if (type.IsGenericType)
+                continue;
+
             if (type.TypeKind is TypeKind.Class or TypeKind.Struct)
             {
                 var properties = type.GetMembers()
@@ -182,6 +186,10 @@ public class PropertyResolverGenerator : IIncrementalGenerator
 
     private static void CollectNestedTypes(INamedTypeSymbol type, List<TypeInfo> types)
     {
+        // Skip generic types - they cannot be pattern-matched in switch expressions
+        if (type.IsGenericType)
+            return;
+
         if (type.TypeKind is TypeKind.Class or TypeKind.Struct)
         {
             var properties = type.GetMembers()

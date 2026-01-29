@@ -370,4 +370,76 @@ public class PropertyResolverGeneratorTests
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("global::TestNamespace.OrderStruct", generatedCode);
     }
+
+    [Fact]
+    public void Generator_WithGenericType_SkipsGenericType()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class GenericEntity<T>
+                                  {
+                                      public string AccountId { get; set; }
+                                      public T Value { get; set; }
+                                  }
+                                  
+                                  public class NonGenericEntity
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        
+        // Should include the non-generic type
+        Assert.Contains("global::TestNamespace.NonGenericEntity", generatedCode);
+        
+        // Should NOT include the generic type in the switch expression
+        Assert.DoesNotContain("global::TestNamespace.GenericEntity", generatedCode);
+    }
+
+    [Fact]
+    public void Generator_WithOnlyGenericTypes_GeneratesNoResolver()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class GenericEntity<T>
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                                  
+                                  public class AnotherGeneric<TKey, TValue>
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        // No resolver should be generated since all matching types are generic
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.Null(generatedFile);
+    }
 }
