@@ -1,8 +1,12 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
     <PropertyGroup>
         <TargetFramework>netstandard2.0</TargetFramework>
         <LangVersion>latest</LangVersion>
+        <Nullable>enable</Nullable>
+        
+        <!-- This assembly is bundled into the PropertyResolvers package -->
+        <IsPackable>false</IsPackable>
     </PropertyGroup>
 
 </Project>
