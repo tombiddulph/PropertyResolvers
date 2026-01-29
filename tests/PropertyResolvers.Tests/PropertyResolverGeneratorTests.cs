@@ -1,0 +1,355 @@
+using System.Collections.Immutable;
+using System.Linq;
+using System.Reflection;
+using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using PropertyResolvers.Generators;
+using Xunit;
+
+namespace PropertyResolvers.Tests;
+
+public class PropertyResolverGeneratorTests
+{
+    private static GeneratorDriverRunResult RunGenerator(string source)
+    {
+        // Create syntax tree
+        var syntaxTree = CSharpSyntaxTree.ParseText(source);
+        
+        // Get references - need the attribute assembly and core runtime
+        var references = new[]
+        {
+            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
+            MetadataReference.CreateFromFile(typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location),
+            MetadataReference.CreateFromFile(Assembly.Load("System.Runtime").Location),
+        };
+        
+        // Create compilation
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { syntaxTree },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        // Create and run generator
+        var generator = new PropertyResolverGenerator();
+        var driver = CSharpGeneratorDriver.Create(generator);
+        
+        return driver.RunGenerators(compilation).GetRunResult();
+    }
+
+    [Fact]
+    public void Generator_WithSingleProperty_GeneratesResolver()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        // Check for generated file
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("public static string? GetAccountId(object? obj)", generatedCode);
+        Assert.Contains("global::TestNamespace.Order x => x.AccountId", generatedCode);
+    }
+
+    [Fact]
+    public void Generator_WithMultipleProperties_GeneratesMultipleResolvers()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+                              [assembly: GeneratePropertyResolver("TenantId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                      public string TenantId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        Assert.Contains(result.GeneratedTrees, t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        Assert.Contains(result.GeneratedTrees, t => t.FilePath.EndsWith("TenantIdResolver.g.cs"));
+    }
+
+    [Fact]
+    public void Generator_WithExcludeNamespaces_ExcludesMatchingTypes()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId", ExcludeNamespaces = new[] { "Excluded" })]
+
+                              namespace Included
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+
+                              namespace Excluded
+                              {
+                                  public class Customer
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("global::Included.Order", generatedCode);
+        Assert.DoesNotContain("global::Excluded.Customer", generatedCode);
+    }
+
+    [Fact]
+    public void Generator_WithIncludeNamespaces_OnlyIncludesMatchingTypes()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId", IncludeNamespaces = new[] { "Included" })]
+
+                              namespace Included
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+
+                              namespace Other
+                              {
+                                  public class Customer
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("global::Included.Order", generatedCode);
+        Assert.DoesNotContain("global::Other.Customer", generatedCode);
+    }
+
+    [Fact]
+    public void Generator_WithNoMatchingTypes_DoesNotGenerateResolver()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("NonExistentProperty")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("NonExistentPropertyResolver.g.cs"));
+        
+        Assert.Null(generatedFile);
+    }
+
+    [Fact]
+    public void Generator_WithMultipleMatchingTypes_IncludesAllInResolver()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                                  
+                                  public class Customer
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                                  
+                                  public class Invoice
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("global::TestNamespace.Order", generatedCode);
+        Assert.Contains("global::TestNamespace.Customer", generatedCode);
+        Assert.Contains("global::TestNamespace.Invoice", generatedCode);
+    }
+
+    [Fact]
+    public void Generator_WithDuplicatePropertyNames_DeduplicatesAndGeneratesSingleResolver()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        // Should only generate one resolver file, not two
+        var generatedFiles = result.GeneratedTrees
+            .Where(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"))
+            .ToList();
+        
+        Assert.Single(generatedFiles);
+    }
+
+    [Fact]
+    public void Generator_WithCaseInsensitiveDuplicates_DeduplicatesCorrectly()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+                              [assembly: GeneratePropertyResolver("accountid")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        // Should only generate one resolver file (takes the first one)
+        var accountIdFiles = result.GeneratedTrees
+            .Where(t => t.FilePath.Contains("Resolver.g.cs"))
+            .ToList();
+        
+        Assert.Single(accountIdFiles);
+    }
+
+    [Fact]
+    public void Generator_UsesAssemblyNameForNamespace()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("namespace TestAssembly;", generatedCode);
+    }
+    
+    [Fact]
+    public void Generator_WithStructType_IncludesInResolver()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public struct OrderStruct
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
+        
+        Assert.NotNull(generatedFile);
+        
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("global::TestNamespace.OrderStruct", generatedCode);
+    }
+}

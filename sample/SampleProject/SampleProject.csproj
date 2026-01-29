@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <Nullable>enable</Nullable>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <ProjectReference Include="..\..\src\PropertyResolvers.Attributes\PropertyResolvers.Attributes.csproj" />
+        <ProjectReference Include="..\..\src\PropertyResolvers.Generators\PropertyResolvers.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
+    </ItemGroup>
+
+  
+
+</Project>

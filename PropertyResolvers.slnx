@@ -1,0 +1,12 @@
+<Solution>
+  <Folder Name="/sample/">
+    <Project Path="sample/SampleProject/SampleProject.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/PropertyResolvers.Attributes/PropertyResolvers.Attributes.csproj" />
+    <Project Path="src/PropertyResolvers.Generators/PropertyResolvers.Generators.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/PropertyResolvers.Tests/PropertyResolvers.Tests.csproj" />
+  </Folder>
+</Solution>
