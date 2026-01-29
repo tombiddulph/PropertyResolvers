@@ -13,7 +13,7 @@ public class PropertyResolverGeneratorTests
     {
         // Create syntax tree
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
-        
+
         // Include all currently loaded assemblies to ensure proper symbol resolution
         // This mimics how the IDE has access to all project references
         var references = AppDomain.CurrentDomain.GetAssemblies()
@@ -21,14 +21,14 @@ public class PropertyResolverGeneratorTests
             .Select(a => MetadataReference.CreateFromFile(a.Location))
             .Cast<MetadataReference>()
             .ToList();
-        
+
         // Ensure our attribute assembly is included
         var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
-        if (!references.Any(r => r.Display == attributeAssemblyLocation))
+        if (references.All(r => r.Display != attributeAssemblyLocation))
         {
             references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
         }
-        
+
         // Create compilation
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
@@ -40,7 +40,7 @@ public class PropertyResolverGeneratorTests
         var compilationErrors = compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
-        
+
         if (compilationErrors.Count > 0)
         {
             var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
@@ -51,12 +51,12 @@ public class PropertyResolverGeneratorTests
         // Create and run generator
         var generator = new PropertyResolverGenerator();
         var driver = CSharpGeneratorDriver.Create(generator);
-        
+
         return driver.RunGenerators(compilation).GetRunResult();
     }
 
     [Fact]
-    public void Generator_WithSingleProperty_GeneratesResolver()
+    public void GeneratorWithSinglePropertyGeneratesResolver()
     {
         const string source = """
 
@@ -77,17 +77,17 @@ public class PropertyResolverGeneratorTests
 
         // Check for generated file
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("public static string? GetAccountId(object? obj)", generatedCode);
         Assert.Contains("global::TestNamespace.Order x => x.AccountId", generatedCode);
     }
 
     [Fact]
-    public void Generator_WithMultipleProperties_GeneratesMultipleResolvers()
+    public void GeneratorWithMultiplePropertiesGeneratesMultipleResolvers()
     {
         const string source = """
 
@@ -108,12 +108,14 @@ public class PropertyResolverGeneratorTests
 
         var result = RunGenerator(source);
 
-        Assert.Contains(result.GeneratedTrees, t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        Assert.Contains(result.GeneratedTrees, t => t.FilePath.EndsWith("TenantIdResolver.g.cs"));
+        Assert.Contains(result.GeneratedTrees,
+            t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+        Assert.Contains(result.GeneratedTrees,
+            t => t.FilePath.EndsWith("TenantIdResolver.g.cs", StringComparison.Ordinal));
     }
 
     [Fact]
-    public void Generator_WithExcludeNamespaces_ExcludesMatchingTypes()
+    public void GeneratorWithExcludeNamespacesExcludesMatchingTypes()
     {
         const string source = """
 
@@ -141,17 +143,17 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("global::Included.Order", generatedCode);
         Assert.DoesNotContain("global::Excluded.Customer", generatedCode);
     }
 
     [Fact]
-    public void Generator_WithIncludeNamespaces_OnlyIncludesMatchingTypes()
+    public void GeneratorWithIncludeNamespacesOnlyIncludesMatchingTypes()
     {
         const string source = """
 
@@ -179,17 +181,17 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("global::Included.Order", generatedCode);
         Assert.DoesNotContain("global::Other.Customer", generatedCode);
     }
 
     [Fact]
-    public void Generator_WithNoMatchingTypes_DoesNotGenerateResolver()
+    public void GeneratorWithNoMatchingTypesDoesNotGenerateResolver()
     {
         const string source = """
 
@@ -209,13 +211,13 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("NonExistentPropertyResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("NonExistentPropertyResolver.g.cs", StringComparison.Ordinal));
+
         Assert.Null(generatedFile);
     }
 
     [Fact]
-    public void Generator_WithMultipleMatchingTypes_IncludesAllInResolver()
+    public void GeneratorWithMultipleMatchingTypesIncludesAllInResolver()
     {
         const string source = """
 
@@ -245,10 +247,10 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("global::TestNamespace.Order", generatedCode);
         Assert.Contains("global::TestNamespace.Customer", generatedCode);
@@ -256,7 +258,7 @@ public class PropertyResolverGeneratorTests
     }
 
     [Fact]
-    public void Generator_WithDuplicatePropertyNames_DeduplicatesAndGeneratesSingleResolver()
+    public void GeneratorWithDuplicatePropertyNamesDeduplicatesAndGeneratesSingleResolver()
     {
         const string source = """
 
@@ -278,14 +280,14 @@ public class PropertyResolverGeneratorTests
 
         // Should only generate one resolver file, not two
         var generatedFiles = result.GeneratedTrees
-            .Where(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"))
+            .Where(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal))
             .ToList();
-        
+
         Assert.Single(generatedFiles);
     }
 
     [Fact]
-    public void Generator_WithCaseInsensitiveDuplicates_DeduplicatesCorrectly()
+    public void GeneratorWithCaseInsensitiveDuplicatesDeduplicatesCorrectly()
     {
         const string source = """
 
@@ -309,12 +311,12 @@ public class PropertyResolverGeneratorTests
         var accountIdFiles = result.GeneratedTrees
             .Where(t => t.FilePath.Contains("Resolver.g.cs"))
             .ToList();
-        
+
         Assert.Single(accountIdFiles);
     }
 
     [Fact]
-    public void Generator_UsesAssemblyNameForNamespace()
+    public void GeneratorUsesAssemblyNameForNamespace()
     {
         const string source = """
 
@@ -334,16 +336,16 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("namespace TestAssembly;", generatedCode);
     }
-    
+
     [Fact]
-    public void Generator_WithStructType_IncludesInResolver()
+    public void GeneratorWithStructTypeIncludesInResolver()
     {
         const string source = """
 
@@ -363,16 +365,16 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("global::TestNamespace.OrderStruct", generatedCode);
     }
 
     [Fact]
-    public void Generator_WithGenericType_SkipsGenericType()
+    public void GeneratorWithGenericTypeSkipsGenericType()
     {
         const string source = """
 
@@ -398,21 +400,21 @@ public class PropertyResolverGeneratorTests
         var result = RunGenerator(source);
 
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.NotNull(generatedFile);
-        
+
         var generatedCode = generatedFile.GetText().ToString();
-        
+
         // Should include the non-generic type
         Assert.Contains("global::TestNamespace.NonGenericEntity", generatedCode);
-        
+
         // Should NOT include the generic type in the switch expression
         Assert.DoesNotContain("global::TestNamespace.GenericEntity", generatedCode);
     }
 
     [Fact]
-    public void Generator_WithOnlyGenericTypes_GeneratesNoResolver()
+    public void GeneratorWithOnlyGenericTypesGeneratesNoResolver()
     {
         const string source = """
 
@@ -438,8 +440,8 @@ public class PropertyResolverGeneratorTests
 
         // No resolver should be generated since all matching types are generic
         var generatedFile = result.GeneratedTrees
-            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs"));
-        
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
         Assert.Null(generatedFile);
     }
 }

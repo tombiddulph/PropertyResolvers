@@ -4,8 +4,12 @@ using System;
 
 namespace PropertyResolvers.Attributes
 {
-    [AttributeUsage(System.AttributeTargets.Assembly, AllowMultiple = true)]
-    public sealed class GeneratePropertyResolverAttribute(string propertyName) : System.Attribute
+    /// <summary>
+    /// Attribute to apply at the assembly level to generate property resolvers for the specified property name.
+    /// </summary>
+    /// <param name="propertyName"></param>
+    [AttributeUsage(AttributeTargets.Assembly, AllowMultiple = true)]
+    public sealed class GeneratePropertyResolverAttribute(string propertyName) : Attribute
     {
         /// <summary>
         /// The name of the property to generate a resolver for, note that the generated ressolver class

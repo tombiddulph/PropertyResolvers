@@ -1,0 +1,28 @@
+<Project>
+    <PropertyGroup>
+        <Company>tombiddulph</Company>
+        <Authors>Tom Biddulph</Authors>
+
+        <RepositoryUrl>https://github.com/tombiddulph/REPO</RepositoryUrl>
+        <RepositoryType>git</RepositoryType>
+
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+        <PublishRepositoryUrl>true</PublishRepositoryUrl>
+        <EmbedUntrackedSources>true</EmbedUntrackedSources>
+        <IncludeSymbols>true</IncludeSymbols>
+        <SymbolPackageFormat>snupkg</SymbolPackageFormat>
+
+        <AnalysisLevel>latest-Recommended</AnalysisLevel>
+        <Nullable>enable</Nullable>
+        <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+        <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+        <Deterministic>true</Deterministic>
+        <ContinuousIntegrationBuild Condition="'$(CI)' == 'true'">true</ContinuousIntegrationBuild>
+        <LangVersion>latest</LangVersion>
+        <Features>strict</Features>
+        <IsTestProject>false</IsTestProject>
+        <NoPackageAnalysis>false</NoPackageAnalysis>
+    </PropertyGroup>
+</Project>

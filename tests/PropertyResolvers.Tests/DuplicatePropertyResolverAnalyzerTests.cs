@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Immutable;
+using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -60,7 +61,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     }
 
     [Fact]
-    public async Task NoDiagnostic_WhenNoAttributes()
+    public async Task NoDiagnosticWhenNoAttributes()
     {
         const string source = """
 
@@ -79,7 +80,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     }
 
     [Fact]
-    public async Task NoDiagnostic_WhenSingleAttribute()
+    public async Task NoDiagnosticWhenSingleAttribute()
     {
         const string source = """
 
@@ -102,7 +103,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     }
 
     [Fact]
-    public async Task NoDiagnostic_WhenDifferentPropertyNames()
+    public async Task NoDiagnosticWhenDifferentPropertyNames()
     {
         const string source = """
 
@@ -129,7 +130,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     }
 
     [Fact]
-    public async Task Diagnostic_WhenDuplicatePropertyName()
+    public async Task DiagnosticWhenDuplicatePropertyName()
     {
         const string source = """
 
@@ -151,11 +152,11 @@ public class DuplicatePropertyResolverAnalyzerTests
         
         Assert.Single(diagnostics);
         Assert.Equal(DuplicatePropertyResolverAnalyzer.DiagnosticId, diagnostics[0].Id);
-        Assert.Contains("AccountId", diagnostics[0].GetMessage());
+        Assert.Contains("AccountId", diagnostics[0].GetMessage(CultureInfo.InvariantCulture));
     }
 
     [Fact]
-    public async Task Diagnostic_WhenMultipleDuplicates()
+    public async Task DiagnosticWhenMultipleDuplicates()
     {
         const string source = """
 
@@ -178,11 +179,11 @@ public class DuplicatePropertyResolverAnalyzerTests
         
         // Should report 2 diagnostics (second and third occurrences)
         Assert.Equal(2, diagnostics.Length);
-        Assert.All(diagnostics, d => Assert.Contains("AccountId", d.GetMessage()));
+        Assert.All(diagnostics, d => Assert.Contains("AccountId", d.GetMessage(CultureInfo.InvariantCulture)));
     }
 
     [Fact]
-    public async Task Diagnostic_WhenCaseInsensitiveDuplicate()
+    public async Task DiagnosticWhenCaseInsensitiveDuplicate()
     {
         const string source = """
 
@@ -204,11 +205,11 @@ public class DuplicatePropertyResolverAnalyzerTests
         
         Assert.Single(diagnostics);
         // The message contains the first-seen property name (case-insensitive match)
-        Assert.Contains("AccountId", diagnostics[0].GetMessage());
+        Assert.Contains("AccountId", diagnostics[0].GetMessage(CultureInfo.InvariantCulture));
     }
 
     [Fact]
-    public async Task Diagnostic_WhenMixedCaseDuplicates()
+    public async Task DiagnosticWhenMixedCaseDuplicates()
     {
         const string source = """
 
@@ -234,7 +235,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     }
 
     [Fact]
-    public async Task Diagnostic_OnlyOnDuplicates_NotFirstOccurrence()
+    public async Task DiagnosticOnlyOnDuplicatesNotFirstOccurrence()
     {
         const string source = """
 
@@ -259,14 +260,14 @@ public class DuplicatePropertyResolverAnalyzerTests
         
         // Should report 2 diagnostics (one for AccountId duplicate, one for TenantId duplicate)
         Assert.Equal(2, diagnostics.Length);
-        
-        var messages = diagnostics.Select(d => d.GetMessage()).ToList();
+       
+        var messages = diagnostics.Select(d => d.GetMessage(CultureInfo.InvariantCulture)).ToList();
         Assert.Contains(messages, m => m.Contains("AccountId"));
         Assert.Contains(messages, m => m.Contains("TenantId"));
     }
 
     [Fact]
-    public async Task Diagnostic_WhenDifferentNamespaceOptions_StillDetectsDuplicate()
+    public async Task DiagnosticWhenDifferentNamespaceOptionsStillDetectsDuplicate()
     {
         // Different namespace options don't make duplicates okay - still same property name
         const string source = """
@@ -288,11 +289,11 @@ public class DuplicatePropertyResolverAnalyzerTests
         var diagnostics = await GetDiagnosticsAsync(source);
         
         Assert.Single(diagnostics);
-        Assert.Contains("AccountId", diagnostics[0].GetMessage());
+        Assert.Contains("AccountId", diagnostics[0].GetMessage(CultureInfo.InvariantCulture));
     }
 
     [Fact]
-    public async Task Diagnostic_HasCorrectSeverity()
+    public async Task DiagnosticHasCorrectSeverity()
     {
         const string source = """
 
@@ -317,7 +318,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     }
 
     [Fact]
-    public async Task Diagnostic_HasCorrectLocation()
+    public async Task DiagnosticHasCorrectLocation()
     {
         const string source = """
 

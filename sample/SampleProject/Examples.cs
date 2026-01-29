@@ -6,7 +6,7 @@ namespace SampleProject;
 
 public class Examples
 {
-    public void Demo()
+    public static void Demo()
     {
         var order = new Order { AccountId = "ACC-123", TenantId = "TENANT-1" };
         var customer = new Customer { AccountId = "ACC-456" };

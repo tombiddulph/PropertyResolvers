@@ -8,12 +8,14 @@ using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace PropertyResolvers.Generators;
 
+/// <summary>
+/// Analyzes assembly-level GeneratePropertyResolver attributes to ensure no duplicate property names are used.
+/// </summary>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public class DuplicatePropertyResolverAnalyzer : DiagnosticAnalyzer
 {
     public const string DiagnosticId = "PR001";
-
-    private const string AttributeName = "GeneratePropertyResolver";
+    
     private const string AttributeFullName = "PropertyResolvers.Attributes.GeneratePropertyResolverAttribute";
 
     private static readonly LocalizableString Title =
@@ -36,9 +38,11 @@ public class DuplicatePropertyResolverAnalyzer : DiagnosticAnalyzer
         isEnabledByDefault: true,
         description: Description);
 
+    /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
         ImmutableArray.Create(Rule);
 
+    /// <inheritdoc />
     public override void Initialize(AnalysisContext context)
     {
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
@@ -68,11 +72,15 @@ public class DuplicatePropertyResolverAnalyzer : DiagnosticAnalyzer
                 // Check if this is our attribute
                 var symbolInfo = semanticModel.GetSymbolInfo(attribute, context.CancellationToken);
                 if (symbolInfo.Symbol is not IMethodSymbol attributeConstructor)
+                {
                     continue;
+                }
 
                 var attributeType = attributeConstructor.ContainingType;
                 if (attributeType.ToDisplayString() != AttributeFullName)
+                {
                     continue;
+                }
 
                 // Get the property name from the first argument
                 if (attribute.ArgumentList?.Arguments.Count > 0)
