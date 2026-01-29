@@ -3,7 +3,7 @@
         <Company>tombiddulph</Company>
         <Authors>Tom Biddulph</Authors>
 
-        <RepositoryUrl>https://github.com/tombiddulph/REPO</RepositoryUrl>
+        <RepositoryUrl>https://github.com/tombiddulph/PropertyResolvers</RepositoryUrl>
         <RepositoryType>git</RepositoryType>
 
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
