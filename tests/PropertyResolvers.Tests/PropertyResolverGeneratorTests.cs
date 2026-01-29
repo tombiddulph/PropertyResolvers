@@ -1,6 +1,5 @@
-using System.Collections.Immutable;
+using System;
 using System.Linq;
-using System.Reflection;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using PropertyResolvers.Generators;
@@ -15,13 +14,20 @@ public class PropertyResolverGeneratorTests
         // Create syntax tree
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
         
-        // Get references - need the attribute assembly and core runtime
-        var references = new[]
+        // Include all currently loaded assemblies to ensure proper symbol resolution
+        // This mimics how the IDE has access to all project references
+        var references = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
+            .Select(a => MetadataReference.CreateFromFile(a.Location))
+            .Cast<MetadataReference>()
+            .ToList();
+        
+        // Ensure our attribute assembly is included
+        var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
+        if (!references.Any(r => r.Display == attributeAssemblyLocation))
         {
-            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location),
-            MetadataReference.CreateFromFile(Assembly.Load("System.Runtime").Location),
-        };
+            references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
+        }
         
         // Create compilation
         var compilation = CSharpCompilation.Create(
@@ -29,6 +35,18 @@ public class PropertyResolverGeneratorTests
             new[] { syntaxTree },
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        // Verify compilation has no errors - if it does, symbol resolution won't work properly
+        var compilationErrors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        
+        if (compilationErrors.Count > 0)
+        {
+            var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
+            throw new InvalidOperationException(
+                $"Test compilation has errors. Symbol resolution will not work correctly:{Environment.NewLine}{errorMessages}");
+        }
 
         // Create and run generator
         var generator = new PropertyResolverGenerator();
