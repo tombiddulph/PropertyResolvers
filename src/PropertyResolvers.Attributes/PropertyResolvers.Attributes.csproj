@@ -5,8 +5,15 @@
         <LangVersion>latest</LangVersion>
         <Nullable>enable</Nullable>
         
-        <!-- This assembly is bundled into the PropertyResolvers package -->
-        <IsPackable>false</IsPackable>
+        <!-- NuGet Package Configuration -->
+        <IsPackable>true</IsPackable>
+        <PackageId>PropertyResolvers.Attributes</PackageId>
+        <Version>1.0.0</Version>
+        <Authors>Tom Biddulph</Authors>
+        <Description>Attributes for the PropertyResolvers source generator. Use GeneratePropertyResolverAttribute to configure which properties should have resolvers generated.</Description>
+        <PackageTags>source-generator;analyzer;roslyn;properties;attributes</PackageTags>
+        <PackageLicenseExpression>MIT</PackageLicenseExpression>
+        <RepositoryType>git</RepositoryType>
     </PropertyGroup>
 
 </Project>
