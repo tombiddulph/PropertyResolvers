@@ -1,6 +1,6 @@
+using System;
 using System.Collections.Immutable;
 using System.Linq;
-using System.Reflection;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
@@ -17,18 +17,38 @@ public class DuplicatePropertyResolverAnalyzerTests
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
         
-        var references = new[]
+        // Include all currently loaded assemblies to ensure proper symbol resolution
+        // This mimics how the IDE has access to all project references
+        var references = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
+            .Select(a => MetadataReference.CreateFromFile(a.Location))
+            .Cast<MetadataReference>()
+            .ToList();
+        
+        // Ensure our attribute assembly is included
+        var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
+        if (!references.Any(r => r.Display == attributeAssemblyLocation))
         {
-            MetadataReference.CreateFromFile(typeof(object).Assembly.Location),
-            MetadataReference.CreateFromFile(typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location),
-            MetadataReference.CreateFromFile(Assembly.Load("System.Runtime").Location),
-        };
+            references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
+        }
         
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
             [syntaxTree],
             references,
             new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        // Verify compilation has no errors - if it does, symbol resolution won't work properly
+        var compilationErrors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+        
+        if (compilationErrors.Count > 0)
+        {
+            var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
+            throw new InvalidOperationException(
+                $"Test compilation has errors. Symbol resolution will not work correctly:{Environment.NewLine}{errorMessages}");
+        }
 
         var analyzer = new DuplicatePropertyResolverAnalyzer();
         var analyzers = ImmutableArray.Create<DiagnosticAnalyzer>(analyzer);
@@ -183,7 +203,8 @@ public class DuplicatePropertyResolverAnalyzerTests
         var diagnostics = await GetDiagnosticsAsync(source);
         
         Assert.Single(diagnostics);
-        Assert.Contains("accountid", diagnostics[0].GetMessage());
+        // The message contains the first-seen property name (case-insensitive match)
+        Assert.Contains("AccountId", diagnostics[0].GetMessage());
     }
 
     [Fact]
