@@ -17,7 +17,7 @@ public class DuplicatePropertyResolverAnalyzerTests
     private static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsAsync(string source)
     {
         var syntaxTree = CSharpSyntaxTree.ParseText(source);
-        
+
         // Include all currently loaded assemblies to ensure proper symbol resolution
         // This mimics how the IDE has access to all project references
         var references = AppDomain.CurrentDomain.GetAssemblies()
@@ -25,14 +25,14 @@ public class DuplicatePropertyResolverAnalyzerTests
             .Select(a => MetadataReference.CreateFromFile(a.Location))
             .Cast<MetadataReference>()
             .ToList();
-        
+
         // Ensure our attribute assembly is included
         var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
         if (!references.Any(r => r.Display == attributeAssemblyLocation))
         {
             references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
         }
-        
+
         var compilation = CSharpCompilation.Create(
             "TestAssembly",
             [syntaxTree],
@@ -43,7 +43,7 @@ public class DuplicatePropertyResolverAnalyzerTests
         var compilationErrors = compilation.GetDiagnostics()
             .Where(d => d.Severity == DiagnosticSeverity.Error)
             .ToList();
-        
+
         if (compilationErrors.Count > 0)
         {
             var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
@@ -53,11 +53,11 @@ public class DuplicatePropertyResolverAnalyzerTests
 
         var analyzer = new DuplicatePropertyResolverAnalyzer();
         var analyzers = ImmutableArray.Create<DiagnosticAnalyzer>(analyzer);
-        
+
         var compilationWithAnalyzers = compilation.WithAnalyzers(analyzers);
         var diagnostics = await compilationWithAnalyzers.GetAnalyzerDiagnosticsAsync(CancellationToken.None);
-        
-        return [..diagnostics.Where(d => d.Id == DuplicatePropertyResolverAnalyzer.DiagnosticId)];
+
+        return [.. diagnostics.Where(d => d.Id == DuplicatePropertyResolverAnalyzer.DiagnosticId)];
     }
 
     [Fact]
@@ -75,7 +75,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Empty(diagnostics);
     }
 
@@ -98,7 +98,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Empty(diagnostics);
     }
 
@@ -125,7 +125,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Empty(diagnostics);
     }
 
@@ -149,7 +149,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Single(diagnostics);
         Assert.Equal(DuplicatePropertyResolverAnalyzer.DiagnosticId, diagnostics[0].Id);
         Assert.Contains("AccountId", diagnostics[0].GetMessage(CultureInfo.InvariantCulture));
@@ -176,7 +176,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         // Should report 2 diagnostics (second and third occurrences)
         Assert.Equal(2, diagnostics.Length);
         Assert.All(diagnostics, d => Assert.Contains("AccountId", d.GetMessage(CultureInfo.InvariantCulture)));
@@ -202,7 +202,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Single(diagnostics);
         // The message contains the first-seen property name (case-insensitive match)
         Assert.Contains("AccountId", diagnostics[0].GetMessage(CultureInfo.InvariantCulture));
@@ -229,7 +229,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         // Should report 2 diagnostics (ACCOUNTID and accountID)
         Assert.Equal(2, diagnostics.Length);
     }
@@ -257,10 +257,10 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         // Should report 2 diagnostics (one for AccountId duplicate, one for TenantId duplicate)
         Assert.Equal(2, diagnostics.Length);
-       
+
         var messages = diagnostics.Select(d => d.GetMessage(CultureInfo.InvariantCulture)).ToList();
         Assert.Contains(messages, m => m.Contains("AccountId"));
         Assert.Contains(messages, m => m.Contains("TenantId"));
@@ -287,7 +287,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Single(diagnostics);
         Assert.Contains("AccountId", diagnostics[0].GetMessage(CultureInfo.InvariantCulture));
     }
@@ -312,7 +312,7 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Single(diagnostics);
         Assert.Equal(DiagnosticSeverity.Error, diagnostics[0].Severity);
     }
@@ -337,9 +337,9 @@ public class DuplicatePropertyResolverAnalyzerTests
                               """;
 
         var diagnostics = await GetDiagnosticsAsync(source);
-        
+
         Assert.Single(diagnostics);
-        
+
         // The diagnostic should be on line 5 (the duplicate)
         var location = diagnostics[0].Location;
         var lineSpan = location.GetLineSpan();

@@ -27,13 +27,13 @@ public class Examples
         var tenantId1 = TenantIdResolver.GetTenantId(order); // TENANT-1
         var tenantId2 = TenantIdResolver.GetTenantId(invoice); // TENANT-2
         var tenantId3 = TenantIdResolver.GetTenantId(customer); // null (Customer doesn't have TenantId)
-        
+
         var entityId = EntityIdResolver.GetEntityId(entity);
 
         Console.WriteLine(accountId1);
         Console.WriteLine(accountId2);
         Console.WriteLine(accountId3);
-        Console.WriteLine(accountId4 ?? "null");    
+        Console.WriteLine(accountId4 ?? "null");
         Console.WriteLine(tenantId1);
         Console.WriteLine(tenantId2);
         Console.WriteLine(tenantId3 ?? "null");

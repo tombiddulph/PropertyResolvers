@@ -20,7 +20,7 @@ namespace PropertyResolvers.Attributes
         /// Namespaces to include when searching for types with the specified property.
         /// </summary>
         public string[]? IncludeNamespaces { get; set; }
-        
+
         /// <summary>
         /// Namespaces to exclude when searching for types with the specified property.
         /// </summary>

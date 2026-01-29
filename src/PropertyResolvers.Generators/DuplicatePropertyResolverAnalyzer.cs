@@ -15,7 +15,7 @@ namespace PropertyResolvers.Generators;
 public class DuplicatePropertyResolverAnalyzer : DiagnosticAnalyzer
 {
     public const string DiagnosticId = "PR001";
-    
+
     private const string AttributeFullName = "PropertyResolvers.Attributes.GeneratePropertyResolverAttribute";
 
     private static readonly LocalizableString Title =

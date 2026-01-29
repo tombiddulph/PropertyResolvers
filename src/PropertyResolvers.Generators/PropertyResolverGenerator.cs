@@ -14,9 +14,9 @@ namespace PropertyResolvers.Generators;
 [Generator]
 public class PropertyResolverGenerator : IIncrementalGenerator
 {
-   private const string AttributeFullName = "PropertyResolvers.Attributes.GeneratePropertyResolverAttribute";
-   
-   /// <inheritdoc />
+    private const string AttributeFullName = "PropertyResolvers.Attributes.GeneratePropertyResolverAttribute";
+
+    /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
         // // Register the attribute source
@@ -59,8 +59,8 @@ public class PropertyResolverGenerator : IIncrementalGenerator
         var namespaces = compilation.Assembly
             .GlobalNamespace
             .GetNamespaceMembers()
-            .Where(ns => !ns.IsGlobalNamespace && 
-                         !ns.Name.StartsWith("System", StringComparison.Ordinal) && 
+            .Where(ns => !ns.IsGlobalNamespace &&
+                         !ns.Name.StartsWith("System", StringComparison.Ordinal) &&
                          !ns.Name.StartsWith("Microsoft", StringComparison.Ordinal))
             .Select(ns => ns.Name)
             .ToList();
@@ -75,7 +75,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
     private static ImmutableArray<ResolverConfig> GetResolverConfigs(Compilation compilation)
     {
         var configs = new List<ResolverConfig>();
-        
+
         foreach (var attribute in compilation.Assembly.GetAttributes())
         {
             if (attribute.AttributeClass?.ToDisplayString() != AttributeFullName)
@@ -105,7 +105,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
                             .Cast<string>()
                             .ToArray();
                         break;
-                    
+
                     case "ExcludeNamespaces":
                         config.ExcludeNamespaces = namedArg.Value.Values
                             .Select(v => v.Value as string)
@@ -113,14 +113,14 @@ public class PropertyResolverGenerator : IIncrementalGenerator
                             .Cast<string>()
                             .ToArray();
                         break;
-                    
+
                 }
             }
 
             configs.Add(config);
         }
 
-        return [..configs];
+        return [.. configs];
     }
 
     private static List<TypeInfo> GetAllNamedTypes(Compilation compilation)
@@ -233,7 +233,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
 
             foreach (var config in group)
             {
-                
+
                 var matches = allTypes
                     .Where(t => ShouldIncludeType(t, config))
                     .SelectMany(t => t.Properties
@@ -251,8 +251,8 @@ public class PropertyResolverGenerator : IIncrementalGenerator
 
                 methods.AppendLine($"    public static {returnType} {methodName}(object? obj) => obj switch");
                 methods.AppendLine("    {");
-                
-                
+
+
                 foreach (var (typeName, propertyName) in matches)
                 {
                     methods.AppendLine($"        global::{typeName} x => x.{propertyName}.ToString(),");
@@ -291,7 +291,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
         // If includes specified, namespace must match one
         if (config.IncludeNamespaces is { Length: > 0 })
         {
-            if (!config.IncludeNamespaces.Any(inc => ns.StartsWith(inc,  StringComparison.Ordinal)))
+            if (!config.IncludeNamespaces.Any(inc => ns.StartsWith(inc, StringComparison.Ordinal)))
             {
                 return false;
             }
@@ -300,7 +300,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
         // If excludes specified, namespace must not match any
         if (config.ExcludeNamespaces is { Length: > 0 })
         {
-            if (config.ExcludeNamespaces.Any(exc => ns.StartsWith(exc,  StringComparison.Ordinal)))
+            if (config.ExcludeNamespaces.Any(exc => ns.StartsWith(exc, StringComparison.Ordinal)))
             {
                 return false;
             }
@@ -318,6 +318,6 @@ public class PropertyResolverGenerator : IIncrementalGenerator
     }
 
     private record struct PropertyInfo(string Name);
-    
+
     private record struct TypeInfo(string FullName, string Namespace, ImmutableArray<PropertyInfo> Properties);
 }
