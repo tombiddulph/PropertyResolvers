@@ -6,27 +6,29 @@
         <LangVersion>latest</LangVersion>
 
         <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
-        <IsRoslynComponent>true</IsRoslynComponent>
+        <IsRoslynAnalyzer>true</IsRoslynAnalyzer>
 
         <RootNamespace>PropertyResolvers.Generators</RootNamespace>
         <AssemblyName>PropertyResolvers.Generators</AssemblyName>
-        
+
         <!-- NuGet Package Configuration -->
         <IsPackable>true</IsPackable>
         <PackageId>PropertyResolvers</PackageId>
         <Version>1.0.0</Version>
         <Authors>Tom Biddulph</Authors>
-        <Description>A source generator that creates property resolver classes for types with matching properties. Use assembly-level attributes to generate resolvers that can retrieve property values from objects at runtime.</Description>
+        <Description>A source generator that creates property resolver classes for types with
+            matching properties. Use assembly-level attributes to generate resolvers that can
+            retrieve property values from objects at runtime.</Description>
         <PackageTags>source-generator;analyzer;roslyn;properties;reflection</PackageTags>
         <PackageLicenseExpression>MIT</PackageLicenseExpression>
         <PackageReadmeFile>Readme.md</PackageReadmeFile>
         <RepositoryType>git</RepositoryType>
-        
+
         <!-- Analyzer/Generator packages should not have dependencies -->
         <IncludeBuildOutput>false</IncludeBuildOutput>
         <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
         <DevelopmentDependency>true</DevelopmentDependency>
-        
+
         <!-- Suppress warnings about netstandard2.0 compatibility -->
         <NoWarn>$(NoWarn);NU5128</NoWarn>
     </PropertyGroup>
@@ -40,7 +42,8 @@
     </ItemGroup>
 
     <ItemGroup>
-        <ProjectReference Include="..\PropertyResolvers.Attributes\PropertyResolvers.Attributes.csproj" />
+        <ProjectReference
+            Include="..\PropertyResolvers.Attributes\PropertyResolvers.Attributes.csproj" />
     </ItemGroup>
 
     <ItemGroup>
@@ -51,13 +54,4 @@
     <ItemGroup>
         <None Include="Readme.md" Pack="true" PackagePath="\" />
     </ItemGroup>
-
-    <!-- Pack the generator and analyzer into the analyzers folder -->
-    <ItemGroup>
-        <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-        <None Include="$(OutputPath)\PropertyResolvers.Attributes.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-        <!-- Also include attributes in lib so consumers can reference the attribute type -->
-        <None Include="$(OutputPath)\PropertyResolvers.Attributes.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="false" />
-    </ItemGroup>
-
 </Project>

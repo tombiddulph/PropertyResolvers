@@ -51,7 +51,6 @@ jobs:
       - name: Pack PropertyResolvers
         run: |
           dotnet pack src/PropertyResolvers.Generators/PropertyResolvers.Generators.csproj \
-            --no-build \
             --configuration Release \
             -p:PackageVersion=${{ steps.version.outputs.version }}
 
