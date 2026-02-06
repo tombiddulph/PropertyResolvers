@@ -217,7 +217,8 @@ public class PropertyResolverGeneratorTests
 
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("public static class NonExistentPropertyResolver", generatedCode);
-        Assert.DoesNotContain("public static string?", generatedCode);
+        Assert.Contains("public static string? GetNonExistentProperty(object? obj)", generatedCode);
+        Assert.Contains("_ => null", generatedCode);
     }
 
     [Fact]
@@ -449,7 +450,10 @@ public class PropertyResolverGeneratorTests
 
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("public static class AccountIdResolver", generatedCode);
-        Assert.DoesNotContain("public static string?", generatedCode);
+        Assert.Contains("public static string? GetAccountId(object? obj)", generatedCode);
+        Assert.Contains("_ => null", generatedCode);
+        // No type-specific match arms since all types are generic
+        Assert.DoesNotContain("global::TestNamespace", generatedCode);
     }
 
     [Fact]

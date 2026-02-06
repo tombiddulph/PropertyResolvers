@@ -19,11 +19,6 @@ public class PropertyResolverGenerator : IIncrementalGenerator
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // // Register the attribute source
-        // context.RegisterPostInitializationOutput(ctx => ctx.AddSource(
-        //     "GeneratePropertyResolverAttribute.g.cs",
-        //     SourceText.From(AttributeSourceCode, Encoding.UTF8)));
-
         // Get configs and root namespace from compilation
         var compilationData = context.CompilationProvider
             .Select((compilation, _) => (
@@ -239,17 +234,11 @@ public class PropertyResolverGenerator : IIncrementalGenerator
                         .Select(p => (TypeFullName: t.FullName, PropertyName: p.Name, p.IsNullable)))
                     .ToList();
 
-                if (matches.Count == 0)
-                {
-                    continue;
-                }
-
                 const string returnType = "string?";
                 var methodName = $"Get{config.PropertyName}";
 
                 methods.AppendLine($"    public static {returnType} {methodName}(object? obj) => obj switch");
                 methods.AppendLine("    {");
-
 
                 foreach (var (typeName, propertyName, isNullable) in matches)
                 {
