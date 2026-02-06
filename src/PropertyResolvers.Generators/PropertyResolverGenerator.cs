@@ -147,8 +147,8 @@ public class PropertyResolverGenerator : IIncrementalGenerator
             {
                 continue;
             }
-            
-            if (type is {TypeKind: TypeKind.Class or TypeKind.Struct, DeclaredAccessibility: Accessibility.Public})
+
+            if (type is { TypeKind: TypeKind.Class or TypeKind.Struct, DeclaredAccessibility: Accessibility.Public })
             {
                 var properties = type.GetMembers()
                     .OfType<IPropertySymbol>()
