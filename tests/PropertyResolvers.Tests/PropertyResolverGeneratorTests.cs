@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
@@ -543,5 +544,167 @@ public class PropertyResolverGeneratorTests
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("x.AccountId.ToString()", generatedCode);
         Assert.DoesNotContain("x.AccountId?.ToString()", generatedCode);
+    }
+
+    private static List<MetadataReference> GetBaseReferences()
+    {
+        var references = AppDomain.CurrentDomain.GetAssemblies()
+            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
+            .Select(a => MetadataReference.CreateFromFile(a.Location))
+            .Cast<MetadataReference>()
+            .ToList();
+
+        var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
+        if (references.All(r => r.Display != attributeAssemblyLocation))
+        {
+            references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
+        }
+
+        return references;
+    }
+
+    private static GeneratorDriverRunResult RunGeneratorWithReferences(string source, params MetadataReference[] additionalReferences)
+    {
+        var syntaxTree = CSharpSyntaxTree.ParseText(source);
+
+        var references = GetBaseReferences();
+        references.AddRange(additionalReferences);
+
+        var compilation = CSharpCompilation.Create(
+            "TestAssembly",
+            new[] { syntaxTree },
+            references,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var compilationErrors = compilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (compilationErrors.Count > 0)
+        {
+            var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
+            throw new InvalidOperationException(
+                $"Test compilation has errors. Symbol resolution will not work correctly:{Environment.NewLine}{errorMessages}");
+        }
+
+        var generator = new PropertyResolverGenerator();
+        var driver = CSharpGeneratorDriver.Create(generator);
+
+        return driver.RunGenerators(compilation).GetRunResult();
+    }
+
+    [Fact]
+    public void GeneratorWithAttributeInReferencedAssemblyGeneratesResolver()
+    {
+        // Step 1: Build a "package" assembly that contains the [assembly: GeneratePropertyResolver] attribute
+        const string packageSource = """
+
+                                     using PropertyResolvers.Attributes;
+
+                                     [assembly: GeneratePropertyResolver("AccountId")]
+                                     """;
+
+        var packageSyntaxTree = CSharpSyntaxTree.ParseText(packageSource);
+        var packageReferences = GetBaseReferences();
+
+        var packageCompilation = CSharpCompilation.Create(
+            "PackageAssembly",
+            new[] { packageSyntaxTree },
+            packageReferences,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var packageErrors = packageCompilation.GetDiagnostics()
+            .Where(d => d.Severity == DiagnosticSeverity.Error)
+            .ToList();
+
+        if (packageErrors.Count > 0)
+        {
+            var errorMessages = string.Join(Environment.NewLine, packageErrors.Select(e => e.ToString()));
+            throw new InvalidOperationException(
+                $"Package compilation has errors:{Environment.NewLine}{errorMessages}");
+        }
+
+        // Create an in-memory reference to the package assembly
+        var packageReference = packageCompilation.ToMetadataReference();
+
+        // Step 2: Build the "consuming project" that references the package and has types with AccountId
+        const string projectSource = """
+
+                                     namespace MyProject
+                                     {
+                                         public class Order
+                                         {
+                                             public string AccountId { get; set; }
+                                         }
+
+                                         public class Customer
+                                         {
+                                             public string AccountId { get; set; }
+                                         }
+                                     }
+                                     """;
+
+        var result = RunGeneratorWithReferences(projectSource, packageReference);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
+        Assert.NotNull(generatedFile);
+
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("public static string? GetAccountId(object? obj)", generatedCode);
+        Assert.Contains("global::MyProject.Order x => x.AccountId.ToString()", generatedCode);
+        Assert.Contains("global::MyProject.Customer x => x.AccountId.ToString()", generatedCode);
+    }
+
+    [Fact]
+    public void GeneratorWithAttributeInReferencedAssemblyAndSourceDeduplicates()
+    {
+        // Package assembly defines the attribute
+        const string packageSource = """
+
+                                     using PropertyResolvers.Attributes;
+
+                                     [assembly: GeneratePropertyResolver("AccountId")]
+                                     """;
+
+        var packageSyntaxTree = CSharpSyntaxTree.ParseText(packageSource);
+        var packageReferences = GetBaseReferences();
+
+        var packageCompilation = CSharpCompilation.Create(
+            "PackageAssembly",
+            new[] { packageSyntaxTree },
+            packageReferences,
+            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+
+        var packageReference = packageCompilation.ToMetadataReference();
+
+        // Consuming project also defines the same attribute AND has types
+        const string projectSource = """
+
+                                     using PropertyResolvers.Attributes;
+
+                                     [assembly: GeneratePropertyResolver("AccountId")]
+
+                                     namespace MyProject
+                                     {
+                                         public class Order
+                                         {
+                                             public string AccountId { get; set; }
+                                         }
+                                     }
+                                     """;
+
+        var result = RunGeneratorWithReferences(projectSource, packageReference);
+
+        // Should only generate one resolver file (deduplicated)
+        var generatedFiles = result.GeneratedTrees
+            .Where(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal))
+            .ToList();
+
+        Assert.Single(generatedFiles);
+
+        var generatedCode = generatedFiles[0].GetText().ToString();
+        Assert.Contains("global::MyProject.Order x => x.AccountId.ToString()", generatedCode);
     }
 }
