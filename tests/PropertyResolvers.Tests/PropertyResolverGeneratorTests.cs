@@ -88,6 +88,47 @@ public class PropertyResolverGeneratorTests
     }
 
     [Fact]
+    public void GeneratorWhenMessagingRegistryExistsGeneratesModuleInitializerRegistrations()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace PropertyResolvers.Attributes
+                              {
+                                  public static class PropertyResolverRegistry
+                                  {
+                                      public static void Register(string propertyName, System.Func<object?, string?> resolver)
+                                      {
+                                      }
+                                  }
+                              }
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var registrationFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("PropertyResolverRegistration.g.cs", StringComparison.Ordinal));
+
+        Assert.NotNull(registrationFile);
+
+        var registrationCode = registrationFile.GetText().ToString();
+        Assert.Contains("[ModuleInitializer]", registrationCode);
+        Assert.Contains("PropertyResolverRegistry.Register(\"AccountId\"", registrationCode);
+        Assert.Contains("global::TestAssembly.AccountIdResolver.GetAccountId", registrationCode);
+    }
+
+    [Fact]
     public void GeneratorWithMultiplePropertiesGeneratesMultipleResolvers()
     {
         const string source = """
