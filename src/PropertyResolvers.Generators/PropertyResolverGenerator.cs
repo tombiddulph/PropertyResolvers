@@ -71,7 +71,22 @@ public class PropertyResolverGenerator : IIncrementalGenerator
     {
         var configs = new List<ResolverConfig>();
 
-        foreach (var attribute in compilation.Assembly.GetAttributes())
+        // Check the current assembly for attributes
+        CollectConfigsFromAssembly(compilation.Assembly, configs);
+
+        // Check referenced assemblies for attributes (e.g., when the attribute is
+        // defined in a package that the consuming project references)
+        foreach (var referencedAssembly in compilation.SourceModule.ReferencedAssemblySymbols)
+        {
+            CollectConfigsFromAssembly(referencedAssembly, configs);
+        }
+
+        return [.. configs];
+    }
+
+    private static void CollectConfigsFromAssembly(IAssemblySymbol assembly, List<ResolverConfig> configs)
+    {
+        foreach (var attribute in assembly.GetAttributes())
         {
             if (attribute.AttributeClass?.ToDisplayString() != AttributeFullName)
             {
@@ -112,8 +127,6 @@ public class PropertyResolverGenerator : IIncrementalGenerator
 
             configs.Add(config);
         }
-
-        return [.. configs];
     }
 
     private static List<TypeInfo> GetAllNamedTypes(Compilation compilation)
