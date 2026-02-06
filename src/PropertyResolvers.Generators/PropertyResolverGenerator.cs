@@ -99,19 +99,17 @@ public class PropertyResolverGenerator : IIncrementalGenerator
                 switch (namedArg.Key)
                 {
                     case "IncludeNamespaces":
-                        config.IncludeNamespaces = namedArg.Value.Values
+                        config.IncludeNamespaces = [.. namedArg.Value.Values
                             .Select(v => v.Value as string)
                             .Where(v => v != null)
-                            .Cast<string>()
-                            .ToArray();
+                            .Cast<string>()];
                         break;
 
                     case "ExcludeNamespaces":
-                        config.ExcludeNamespaces = namedArg.Value.Values
+                        config.ExcludeNamespaces = [.. namedArg.Value.Values
                             .Select(v => v.Value as string)
                             .Where(v => v != null)
-                            .Cast<string>()
-                            .ToArray();
+                            .Cast<string>()];
                         break;
 
                 }
@@ -139,13 +137,13 @@ public class PropertyResolverGenerator : IIncrementalGenerator
             {
                 continue;
             }
-
-            if (type.TypeKind is TypeKind.Class or TypeKind.Struct)
+            
+            if (type is {TypeKind: TypeKind.Class or TypeKind.Struct, DeclaredAccessibility: Accessibility.Public})
             {
                 var properties = type.GetMembers()
                     .OfType<IPropertySymbol>()
                     .Where(p => p.DeclaredAccessibility == Accessibility.Public && p.GetMethod != null)
-                    .Select(p => new PropertyInfo(p.Name))
+                    .Select(p => new PropertyInfo(p.Name, IsNullableProperty(p)))
                     .ToImmutableArray();
 
                 if (properties.Length > 0)
@@ -183,7 +181,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
             var properties = type.GetMembers()
                 .OfType<IPropertySymbol>()
                 .Where(p => p.DeclaredAccessibility == Accessibility.Public && p.GetMethod != null)
-                .Select(p => new PropertyInfo(p.Name))
+                .Select(p => new PropertyInfo(p.Name, IsNullableProperty(p)))
                 .ToImmutableArray();
 
             if (properties.Length > 0)
@@ -238,7 +236,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
                     .Where(t => ShouldIncludeType(t, config))
                     .SelectMany(t => t.Properties
                         .Where(p => p.Name.Equals(config.PropertyName, StringComparison.OrdinalIgnoreCase))
-                        .Select(p => (TypeFullName: t.FullName, PropertyName: p.Name)))
+                        .Select(p => (TypeFullName: t.FullName, PropertyName: p.Name, p.IsNullable)))
                     .ToList();
 
                 if (matches.Count == 0)
@@ -253,19 +251,15 @@ public class PropertyResolverGenerator : IIncrementalGenerator
                 methods.AppendLine("    {");
 
 
-                foreach (var (typeName, propertyName) in matches)
+                foreach (var (typeName, propertyName, isNullable) in matches)
                 {
-                    methods.AppendLine($"        global::{typeName} x => x.{propertyName}.ToString(),");
+                    var toStringCall = isNullable ? "?.ToString()" : ".ToString()";
+                    methods.AppendLine($"        global::{typeName} x => x.{propertyName}{toStringCall},");
                 }
 
                 methods.AppendLine("        _ => null");
                 methods.AppendLine("    };");
                 methods.AppendLine();
-            }
-
-            if (methods.Length == 0)
-            {
-                continue;
             }
 
             var code = $$"""
@@ -282,6 +276,23 @@ public class PropertyResolverGenerator : IIncrementalGenerator
 
             context.AddSource($"{className}.g.cs", SourceText.From(code, Encoding.UTF8));
         }
+    }
+
+    private static bool IsNullableProperty(IPropertySymbol property)
+    {
+        // Nullable value type (e.g., int?, Guid?)
+        if (property.Type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
+        {
+            return true;
+        }
+
+        // Nullable reference type (e.g., string?, object?)
+        if (property.NullableAnnotation == NullableAnnotation.Annotated)
+        {
+            return true;
+        }
+
+        return false;
     }
 
     private static bool ShouldIncludeType(TypeInfo type, ResolverConfig config)
@@ -317,7 +328,7 @@ public class PropertyResolverGenerator : IIncrementalGenerator
         public string ResolverClassName => $"{PropertyName}Resolver";
     }
 
-    private record struct PropertyInfo(string Name);
+    private record struct PropertyInfo(string Name, bool IsNullable);
 
     private record struct TypeInfo(string FullName, string Namespace, ImmutableArray<PropertyInfo> Properties);
 }

@@ -191,7 +191,7 @@ public class PropertyResolverGeneratorTests
     }
 
     [Fact]
-    public void GeneratorWithNoMatchingTypesDoesNotGenerateResolver()
+    public void GeneratorWithNoMatchingTypesGeneratesEmptyResolver()
     {
         const string source = """
 
@@ -213,7 +213,11 @@ public class PropertyResolverGeneratorTests
         var generatedFile = result.GeneratedTrees
             .FirstOrDefault(t => t.FilePath.EndsWith("NonExistentPropertyResolver.g.cs", StringComparison.Ordinal));
 
-        Assert.Null(generatedFile);
+        Assert.NotNull(generatedFile);
+
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("public static class NonExistentPropertyResolver", generatedCode);
+        Assert.DoesNotContain("public static string?", generatedCode);
     }
 
     [Fact]
@@ -414,7 +418,7 @@ public class PropertyResolverGeneratorTests
     }
 
     [Fact]
-    public void GeneratorWithOnlyGenericTypesGeneratesNoResolver()
+    public void GeneratorWithOnlyGenericTypesGeneratesEmptyResolver()
     {
         const string source = """
 
@@ -438,10 +442,102 @@ public class PropertyResolverGeneratorTests
 
         var result = RunGenerator(source);
 
-        // No resolver should be generated since all matching types are generic
         var generatedFile = result.GeneratedTrees
             .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
 
-        Assert.Null(generatedFile);
+        Assert.NotNull(generatedFile);
+
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("public static class AccountIdResolver", generatedCode);
+        Assert.DoesNotContain("public static string?", generatedCode);
+    }
+
+    [Fact]
+    public void GeneratorWithNullableReferenceTypeUsesNullConditional()
+    {
+        const string source = """
+
+                              #nullable enable
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string? AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
+        Assert.NotNull(generatedFile);
+
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("x.AccountId?.ToString()", generatedCode);
+    }
+
+    [Fact]
+    public void GeneratorWithNullableValueTypeUsesNullConditional()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("Amount")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public int? Amount { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AmountResolver.g.cs", StringComparison.Ordinal));
+
+        Assert.NotNull(generatedFile);
+
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("x.Amount?.ToString()", generatedCode);
+    }
+
+    [Fact]
+    public void GeneratorWithNonNullableTypeUsesToString()
+    {
+        const string source = """
+
+                              using PropertyResolvers.Attributes;
+
+                              [assembly: GeneratePropertyResolver("AccountId")]
+
+                              namespace TestNamespace
+                              {
+                                  public class Order
+                                  {
+                                      public string AccountId { get; set; }
+                                  }
+                              }
+                              """;
+
+        var result = RunGenerator(source);
+
+        var generatedFile = result.GeneratedTrees
+            .FirstOrDefault(t => t.FilePath.EndsWith("AccountIdResolver.g.cs", StringComparison.Ordinal));
+
+        Assert.NotNull(generatedFile);
+
+        var generatedCode = generatedFile.GetText().ToString();
+        Assert.Contains("x.AccountId.ToString()", generatedCode);
+        Assert.DoesNotContain("x.AccountId?.ToString()", generatedCode);
     }
 }
