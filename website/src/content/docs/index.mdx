@@ -1,0 +1,73 @@
+---
+title: One property. Different shapes.
+description: Resolve properties across unrelated C# models with generated, typed access. No reflection or shared interface required.
+template: splash
+hero:
+  tagline: Your models don’t need to agree on an interface. Resolve the properties they share with compile-time generated C#—typed, null-safe, and ready for Native AOT.
+  actions:
+    - text: Get started
+      link: /PropertyResolvers/getting-started/
+      icon: right-arrow
+    - text: Install from NuGet
+      link: https://www.nuget.org/packages/PropertyResolvers/2.5.0
+      variant: minimal
+---
+
+import { Card, CardGrid } from '@astrojs/starlight/components';
+
+## Less ceremony. More C#.
+
+```sh
+dotnet add package PropertyResolvers --version 2.5.0
+```
+
+Select a property once. Use it across models you own—or models you don’t.
+
+```csharp title="Assembly configuration and domain models"
+using System;
+using PropertyResolvers.Attributes;
+
+[assembly: GeneratePropertyResolver("AccountId",
+    Namespace = "Demo.Generated",
+    Output = ResolverOutput.Typed)]
+
+namespace Demo.Models;
+
+public class Order { public Guid AccountId { get; init; } }
+public class Invoice { public Guid AccountId { get; init; } }
+```
+
+```csharp title="Use the generated resolver"
+using Demo.Generated;
+
+// message can be an Order, Invoice, or any other eligible model.
+if (AccountIdResolver.TryGet(message, out Guid accountId))
+{
+    Console.WriteLine(accountId);
+}
+```
+
+No reflection, runtime binder, or shared interface. The generator discovers eligible types and emits ordinary type patterns and property access.
+
+<CardGrid>
+  <Card title="Keep the type" icon="approve-check">
+    Opt into typed access for Guid, numbers, strings, and other matching property types. String formatting stays the compatibility default.
+  </Card>
+  <Card title="Bridge model differences" icon="puzzle">
+    Use aliases for legacy names and nested paths for different object shapes. Ambiguous matches produce diagnostics, not arbitrary selections.
+  </Card>
+  <Card title="Know what’s missing" icon="magnifier">
+    TryGet separates an unsupported source from a supported property whose value is null—even through nullable intermediate objects.
+  </Card>
+  <Card title="Ship without reflection" icon="rocket">
+    Stateless per-assembly dispatch requires no runtime registration. Package consumers are tested with trimming and Native AOT.
+  </Card>
+</CardGrid>
+
+## Built for the edges
+
+Inherited properties, partial types, keyword identifiers, nullable structs, and referenced assemblies all participate in semantic discovery. Invalid configurations get actionable diagnostics. Unrelated method edits reuse cached generation models.
+
+**Version 2.5.0** · **MIT licensed** · **.NET Standard 2.0 libraries** · **C# 10+ / Roslyn 4.11+**
+
+Explore [typed access](/PropertyResolvers/guides/typed-access/), [aliases and paths](/PropertyResolvers/guides/aliases-and-paths/), or the [configuration reference](/PropertyResolvers/reference/configuration/).

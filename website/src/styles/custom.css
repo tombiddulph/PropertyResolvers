@@ -1,0 +1,16 @@
+:root {
+  --sl-color-accent-low: #122d32;
+  --sl-color-accent: #158c85;
+  --sl-color-accent-high: #9ce5d4;
+  --sl-font: 'Segoe UI', system-ui, sans-serif;
+}
+:root[data-theme='light'] {
+  --sl-color-accent-low: #d5f4e9;
+  --sl-color-accent: #08766e;
+  --sl-color-accent-high: #064f49;
+}
+.hero h1 { letter-spacing: -0.045em; }
+.hero .tagline { max-width: 42rem; }
+.card { border-radius: 0.85rem; }
+.hero { background: radial-gradient(ellipse at top right, var(--sl-color-accent-low), transparent 65%); }
+pre { border-radius: 0.6rem; }

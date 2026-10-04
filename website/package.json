@@ -1,0 +1,7 @@
+{
+  "name": "propertyresolvers-docs",
+  "private": true,
+  "type": "module",
+  "scripts": { "dev": "astro dev", "build": "astro build && node scripts/check-links.mjs", "preview": "astro preview" },
+  "dependencies": { "@astrojs/starlight": "^0.42.5", "astro": "^7.3.5" }
+}
