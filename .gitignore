@@ -4,6 +4,9 @@
 ## Get latest from `dotnet new gitignore`
 
 # dotenv files
+website/node_modules/
+website/dist/
+website/.astro/
 .env
 
 # User-specific files

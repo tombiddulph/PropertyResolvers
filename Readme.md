@@ -2,6 +2,8 @@
 
 Compile-time structural property access for C#. Resolve selected properties across unrelated domain models without reflection, `dynamic`, expression compilation, or requiring a shared interface.
 
+**[Documentation & quick start](https://tombiddulph.github.io/PropertyResolvers/)** · [NuGet](https://www.nuget.org/packages/PropertyResolvers)
+
 ```bash
 dotnet add package PropertyResolvers
 ```
