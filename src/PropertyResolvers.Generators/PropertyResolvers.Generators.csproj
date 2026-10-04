@@ -14,7 +14,7 @@
         <!-- NuGet Package Configuration -->
         <IsPackable>true</IsPackable>
         <PackageId>PropertyResolvers</PackageId>
-        <Version>1.0.0</Version>
+        <Version>2.5.0</Version>
         <Authors>Tom Biddulph</Authors>
         <Description>A source generator that creates property resolver classes for types with
             matching properties. Use assembly-level attributes to generate resolvers that can
@@ -24,9 +24,9 @@
         <PackageReadmeFile>Readme.md</PackageReadmeFile>
         <RepositoryType>git</RepositoryType>
 
-        <!-- Analyzer/Generator packages should not have dependencies -->
+        <!-- Runtime attributes are a public dependency; Roslyn tooling stays private. -->
         <IncludeBuildOutput>false</IncludeBuildOutput>
-        <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+        <SuppressDependenciesWhenPacking>false</SuppressDependenciesWhenPacking>
         <DevelopmentDependency>true</DevelopmentDependency>
 
         <!-- Suppress warnings about netstandard2.0 compatibility -->
@@ -43,20 +43,20 @@
 
     <ItemGroup>
         <ProjectReference Include="..\PropertyResolvers.Attributes\PropertyResolvers.Attributes.csproj"
-                          PrivateAssets="all"
                           GeneratePathProperty="true" />
+        <ProjectReference Include="..\PropertyResolvers.CodeFixes\PropertyResolvers.CodeFixes.csproj"
+                          ReferenceOutputAssembly="false" PrivateAssets="all" />
     </ItemGroup>
 
-    <!-- Pack the generator and attributes into the analyzers folder -->
+    <!-- The generator has no runtime dependency on the attributes assembly. -->
     <ItemGroup>
         <None Include="$(OutputPath)\$(AssemblyName).dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
-        <None Include="$(PkgPropertyResolvers_Attributes)\lib\netstandard2.0\PropertyResolvers.Attributes.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" Condition="'$(PkgPropertyResolvers_Attributes)' != ''" />
-        <None Include="$(ProjectDir)..\PropertyResolvers.Attributes\bin\$(Configuration)\netstandard2.0\PropertyResolvers.Attributes.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" Condition="'$(PkgPropertyResolvers_Attributes)' == ''" />
+        <None Include="../PropertyResolvers.CodeFixes/bin/$(Configuration)/netstandard2.0/PropertyResolvers.CodeFixes.dll" Pack="true" PackagePath="analyzers/dotnet/cs" Visible="false" />
     </ItemGroup>
 
-    <!-- Also include Attributes in lib folder so consumers can reference the attributes -->
+    <!-- Public attributes/runtime API are supplied by the versioned package dependency. -->
     <ItemGroup>
-        <None Include="$(ProjectDir)..\PropertyResolvers.Attributes\bin\$(Configuration)\netstandard2.0\PropertyResolvers.Attributes.dll" Pack="true" PackagePath="lib/netstandard2.0" Visible="false" />
+        <None Include="build/PropertyResolvers.props" Pack="true" PackagePath="buildTransitive/PropertyResolvers.props" />
     </ItemGroup>
 
     <ItemGroup>

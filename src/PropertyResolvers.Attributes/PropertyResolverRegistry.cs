@@ -16,7 +16,10 @@ public static class PropertyResolverRegistry
             throw new ArgumentException("Value cannot be null or whitespace.", nameof(propertyName));
         }
 
-        Resolvers[propertyName] = resolver ?? throw new ArgumentNullException(nameof(resolver));
+        if (!Resolvers.TryAdd(propertyName, resolver ?? throw new ArgumentNullException(nameof(resolver))))
+        {
+            throw new InvalidOperationException($"A resolver for '{propertyName}' is already registered.");
+        }
     }
 
     public static bool TryResolve(string propertyName, object? source, out string? value)

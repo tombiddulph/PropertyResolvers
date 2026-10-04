@@ -1,0 +1,7 @@
+<Project>
+  <ItemGroup>
+    <CompilerVisibleProperty Include="PropertyResolversNamespace" />
+    <CompilerVisibleProperty Include="PropertyResolversOutput" />
+    <CompilerVisibleProperty Include="PropertyResolversRegisterRuntime" />
+  </ItemGroup>
+</Project>

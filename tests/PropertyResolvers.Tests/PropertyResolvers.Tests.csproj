@@ -27,6 +27,7 @@
             Include="..\..\src\PropertyResolvers.Attributes\PropertyResolvers.Attributes.csproj" />
         <ProjectReference
             Include="..\..\src\PropertyResolvers.Generators\PropertyResolvers.Generators.csproj" />
+        <ProjectReference Include="../../src/PropertyResolvers.CodeFixes/PropertyResolvers.CodeFixes.csproj" />
     </ItemGroup>
 
 </Project>

@@ -4,6 +4,7 @@
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/PropertyResolvers.Attributes/PropertyResolvers.Attributes.csproj" />
+    <Project Path="src/PropertyResolvers.CodeFixes/PropertyResolvers.CodeFixes.csproj" />
     <Project Path="src/PropertyResolvers.Generators/PropertyResolvers.Generators.csproj" />
   </Folder>
   <Folder Name="/tests/">
