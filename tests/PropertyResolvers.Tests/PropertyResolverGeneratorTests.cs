@@ -3,7 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
-using PropertyResolvers.Generators;
+using PropertyResolvers.Tests.Utils;
 using Xunit;
 
 namespace PropertyResolvers.Tests;
@@ -12,48 +12,7 @@ public class PropertyResolverGeneratorTests
 {
     private static GeneratorDriverRunResult RunGenerator(string source)
     {
-        // Create syntax tree
-        var syntaxTree = CSharpSyntaxTree.ParseText(source);
-
-        // Include all currently loaded assemblies to ensure proper symbol resolution
-        // This mimics how the IDE has access to all project references
-        var references = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
-            .Select(a => MetadataReference.CreateFromFile(a.Location))
-            .Cast<MetadataReference>()
-            .ToList();
-
-        // Ensure our attribute assembly is included
-        var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
-        if (references.All(r => r.Display != attributeAssemblyLocation))
-        {
-            references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
-        }
-
-        // Create compilation
-        var compilation = CSharpCompilation.Create(
-            "TestAssembly",
-            new[] { syntaxTree },
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        // Verify compilation has no errors - if it does, symbol resolution won't work properly
-        var compilationErrors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
-
-        if (compilationErrors.Count > 0)
-        {
-            var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
-            throw new InvalidOperationException(
-                $"Test compilation has errors. Symbol resolution will not work correctly:{Environment.NewLine}{errorMessages}");
-        }
-
-        // Create and run generator
-        var generator = new PropertyResolverGenerator();
-        var driver = CSharpGeneratorDriver.Create(generator);
-
-        return driver.RunGenerators(compilation).GetRunResult();
+        return CompilationTestHelper.RunGenerator([source]).Result;
     }
 
     [Fact]
@@ -84,27 +43,17 @@ public class PropertyResolverGeneratorTests
 
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("public static string? GetAccountId(object? obj)", generatedCode);
-        Assert.Contains("global::TestNamespace.Order x => x.AccountId", generatedCode);
+        Assert.Contains("global::TestNamespace.Order x => FormatValue(x.AccountId)", generatedCode);
     }
 
     [Fact]
-    public void GeneratorWhenMessagingRegistryExistsGeneratesModuleInitializerRegistrations()
+    public void GeneratorWhenResolverRegistryExistsGeneratesModuleInitializerRegistrations()
     {
         const string source = """
 
                               using PropertyResolvers.Attributes;
 
-                              [assembly: GeneratePropertyResolver("AccountId")]
-
-                              namespace PropertyResolvers.Attributes
-                              {
-                                  public static class PropertyResolverRegistry
-                                  {
-                                      public static void Register(string propertyName, System.Func<object?, string?> resolver)
-                                      {
-                                      }
-                                  }
-                              }
+                              [assembly: GeneratePropertyResolver("AccountId", RegisterRuntime = true)]
 
                               namespace TestNamespace
                               {
@@ -123,9 +72,9 @@ public class PropertyResolverGeneratorTests
         Assert.NotNull(registrationFile);
 
         var registrationCode = registrationFile.GetText().ToString();
-        Assert.Contains("[ModuleInitializer]", registrationCode);
+        Assert.Contains("[global::System.Runtime.CompilerServices.ModuleInitializer]", registrationCode);
         Assert.Contains("PropertyResolverRegistry.Register(\"AccountId\"", registrationCode);
-        Assert.Contains("global::TestAssembly.AccountIdResolver.GetAccountId", registrationCode);
+        Assert.Contains("global::TestAssembly.AccountIdResolver.__GetString", registrationCode);
     }
 
     [Fact]
@@ -525,7 +474,8 @@ public class PropertyResolverGeneratorTests
         Assert.NotNull(generatedFile);
 
         var generatedCode = generatedFile.GetText().ToString();
-        Assert.Contains("x.AccountId?.ToString()", generatedCode);
+        Assert.Contains("FormatValue(x.AccountId)", generatedCode);
+        Assert.Contains("value?.ToString()", generatedCode);
     }
 
     [Fact]
@@ -554,7 +504,8 @@ public class PropertyResolverGeneratorTests
         Assert.NotNull(generatedFile);
 
         var generatedCode = generatedFile.GetText().ToString();
-        Assert.Contains("x.Amount?.ToString()", generatedCode);
+        Assert.Contains("FormatValue(x.Amount)", generatedCode);
+        Assert.Contains("value?.ToString()", generatedCode);
     }
 
     [Fact]
@@ -583,55 +534,18 @@ public class PropertyResolverGeneratorTests
         Assert.NotNull(generatedFile);
 
         var generatedCode = generatedFile.GetText().ToString();
-        Assert.Contains("x.AccountId.ToString()", generatedCode);
-        Assert.DoesNotContain("x.AccountId?.ToString()", generatedCode);
+        Assert.Contains("FormatValue(x.AccountId)", generatedCode);
+        Assert.Contains("CultureInfo.InvariantCulture", generatedCode);
     }
 
     private static List<MetadataReference> GetBaseReferences()
     {
-        var references = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
-            .Select(a => MetadataReference.CreateFromFile(a.Location))
-            .Cast<MetadataReference>()
-            .ToList();
-
-        var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
-        if (references.All(r => r.Display != attributeAssemblyLocation))
-        {
-            references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
-        }
-
-        return references;
+        return CompilationTestHelper.References.ToList();
     }
 
     private static GeneratorDriverRunResult RunGeneratorWithReferences(string source, params MetadataReference[] additionalReferences)
     {
-        var syntaxTree = CSharpSyntaxTree.ParseText(source);
-
-        var references = GetBaseReferences();
-        references.AddRange(additionalReferences);
-
-        var compilation = CSharpCompilation.Create(
-            "TestAssembly",
-            new[] { syntaxTree },
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
-
-        var compilationErrors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
-
-        if (compilationErrors.Count > 0)
-        {
-            var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
-            throw new InvalidOperationException(
-                $"Test compilation has errors. Symbol resolution will not work correctly:{Environment.NewLine}{errorMessages}");
-        }
-
-        var generator = new PropertyResolverGenerator();
-        var driver = CSharpGeneratorDriver.Create(generator);
-
-        return driver.RunGenerators(compilation).GetRunResult();
+        return CompilationTestHelper.RunGenerator([source], additionalReferences).Result;
     }
 
     [Fact]
@@ -694,8 +608,8 @@ public class PropertyResolverGeneratorTests
 
         var generatedCode = generatedFile.GetText().ToString();
         Assert.Contains("public static string? GetAccountId(object? obj)", generatedCode);
-        Assert.Contains("global::MyProject.Order x => x.AccountId.ToString()", generatedCode);
-        Assert.Contains("global::MyProject.Customer x => x.AccountId.ToString()", generatedCode);
+        Assert.Contains("global::MyProject.Order x => FormatValue(x.AccountId)", generatedCode);
+        Assert.Contains("global::MyProject.Customer x => FormatValue(x.AccountId)", generatedCode);
     }
 
     [Fact]
@@ -746,6 +660,6 @@ public class PropertyResolverGeneratorTests
         Assert.Single(generatedFiles);
 
         var generatedCode = generatedFiles[0].GetText().ToString();
-        Assert.Contains("global::MyProject.Order x => x.AccountId.ToString()", generatedCode);
+        Assert.Contains("global::MyProject.Order x => FormatValue(x.AccountId)", generatedCode);
     }
 }

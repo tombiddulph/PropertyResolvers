@@ -1,9 +1,6 @@
 using System.Collections.Generic;
 using System.Collections.Immutable;
-using System.Linq;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
-using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
 namespace PropertyResolvers.Generators;
@@ -36,7 +33,8 @@ public class DuplicatePropertyResolverAnalyzer : DiagnosticAnalyzer
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
-        description: Description);
+        description: Description,
+        customTags: [WellKnownDiagnosticTags.CompilationEnd]);
 
     /// <inheritdoc />
     public override ImmutableArray<DiagnosticDescriptor> SupportedDiagnostics =>
@@ -48,74 +46,35 @@ public class DuplicatePropertyResolverAnalyzer : DiagnosticAnalyzer
         context.ConfigureGeneratedCodeAnalysis(GeneratedCodeAnalysisFlags.None);
         context.EnableConcurrentExecution();
 
-        // Use semantic model to analyze compilation units
-        context.RegisterSemanticModelAction(AnalyzeSemanticModel);
+        context.RegisterCompilationAction(AnalyzeCompilation);
     }
 
-    private static void AnalyzeSemanticModel(SemanticModelAnalysisContext context)
+    private static void AnalyzeCompilation(CompilationAnalysisContext context)
     {
-        var semanticModel = context.SemanticModel;
-        var root = semanticModel.SyntaxTree.GetRoot(context.CancellationToken);
-
-        // Find all assembly-level attributes in this syntax tree
-        var attributeLists = root.DescendantNodes()
-            .OfType<AttributeListSyntax>()
-            .Where(al => al.Target?.Identifier.IsKind(SyntaxKind.AssemblyKeyword) == true);
-
-        var propertyNameToAttributes =
-            new Dictionary<string, List<AttributeSyntax>>(System.StringComparer.OrdinalIgnoreCase);
-
-        foreach (var attributeList in attributeLists)
+        var propertyNames = new Dictionary<string, string>(System.StringComparer.OrdinalIgnoreCase);
+        foreach (var attribute in context.Compilation.Assembly.GetAttributes())
         {
-            foreach (var attribute in attributeList.Attributes)
+            context.CancellationToken.ThrowIfCancellationRequested();
+            if (attribute.AttributeClass?.ToDisplayString() != AttributeFullName ||
+                attribute.ConstructorArguments.Length == 0 ||
+                attribute.ConstructorArguments[0].Value is not string propertyName)
             {
-                // Check if this is our attribute
-                var symbolInfo = semanticModel.GetSymbolInfo(attribute, context.CancellationToken);
-                if (symbolInfo.Symbol is not IMethodSymbol attributeConstructor)
+                continue;
+            }
+
+            // Referenced assembly configuration remains an inherited default, not
+            // a duplicate declaration in the consuming assembly.
+            if (propertyNames.TryGetValue(propertyName, out var firstPropertyName))
+            {
+                var syntax = attribute.ApplicationSyntaxReference?.GetSyntax(context.CancellationToken);
+                if (syntax is not null)
                 {
-                    continue;
-                }
-
-                var attributeType = attributeConstructor.ContainingType;
-                if (attributeType.ToDisplayString() != AttributeFullName)
-                {
-                    continue;
-                }
-
-                // Get the property name from the first argument
-                if (attribute.ArgumentList?.Arguments.Count > 0)
-                {
-                    var firstArg = attribute.ArgumentList.Arguments[0];
-                    var constantValue = semanticModel.GetConstantValue(firstArg.Expression, context.CancellationToken);
-
-                    if (constantValue is { HasValue: true, Value: string propertyName })
-                    {
-                        if (!propertyNameToAttributes.TryGetValue(propertyName, out var list))
-                        {
-                            list = [];
-                            propertyNameToAttributes[propertyName] = list;
-                        }
-
-                        list.Add(attribute);
-                    }
+                    context.ReportDiagnostic(Diagnostic.Create(Rule, syntax.GetLocation(), firstPropertyName));
                 }
             }
-        }
-
-        // Report diagnostics for duplicates
-
-        for (var i = 0; i < propertyNameToAttributes.Count; i++)
-        {
-            var kvp = propertyNameToAttributes.ElementAt(i);
+            else
             {
-                var propertyName = kvp.Key;
-
-                for (var j = 1; j < kvp.Value.Count; j++)
-                {
-                    var duplicate = kvp.Value[j];
-                    var diagnostic = Diagnostic.Create(Rule, duplicate.GetLocation(), propertyName);
-                    context.ReportDiagnostic(diagnostic);
-                }
+                propertyNames.Add(propertyName, propertyName);
             }
         }
     }

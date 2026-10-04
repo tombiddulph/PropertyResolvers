@@ -7,6 +7,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <CompilerVisibleProperty Include="PropertyResolversNamespace" />
+        <CompilerVisibleProperty Include="PropertyResolversOutput" />
+        <CompilerVisibleProperty Include="PropertyResolversRegisterRuntime" />
         <ProjectReference Include="..\..\src\PropertyResolvers.Attributes\PropertyResolvers.Attributes.csproj" />
         <ProjectReference Include="..\..\src\PropertyResolvers.Generators\PropertyResolvers.Generators.csproj" OutputItemType="Analyzer" ReferenceOutputAssembly="false"/>
     </ItemGroup>

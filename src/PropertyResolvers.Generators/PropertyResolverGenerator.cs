@@ -4,389 +4,234 @@ using System.Collections.Immutable;
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis.CSharp;
+using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Text;
 
 namespace PropertyResolvers.Generators;
 
-/// <summary>
-/// Generates property resolver methods based on assembly-level GeneratePropertyResolver attributes.
-/// </summary>
+/// <summary>Generates structural property access without runtime reflection.</summary>
 [Generator]
-public class PropertyResolverGenerator : IIncrementalGenerator
+public sealed class PropertyResolverGenerator : IIncrementalGenerator
 {
-    private const string AttributeFullName = "PropertyResolvers.Attributes.GeneratePropertyResolverAttribute";
-    private const string RegistryTypeFullName = "PropertyResolvers.Attributes.PropertyResolverRegistry";
-
-    /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
-        // Get configs and root namespace from compilation
-        var compilationData = context.CompilationProvider
-            .Select((compilation, _) => (
-                Configs: GetResolverConfigs(compilation),
-                RootNamespace: GetRootNamespace(compilation),
-                HasResolverRegistry: compilation.GetTypeByMetadataName(RegistryTypeFullName) is not null
-            ));
+        var sourceTypes = context.SyntaxProvider.CreateSyntaxProvider(
+                static (node, _) => node is TypeDeclarationSyntax,
+                static (syntax, token) => PropertyMatching.Source(syntax, token))
+            .Where(static candidate => candidate is not null)
+            .Select(static (candidate, _) => candidate!)
+            .WithComparer(CandidateComparer.Instance)
+            .WithTrackingName("SourceTypes");
 
-        // Get all named types in the compilation
-        var allTypes = context.CompilationProvider
-            .SelectMany((compilation, _) => GetAllNamedTypes(compilation));
+        var metadataTypes = context.CompilationProvider
+            .Select(static (compilation, token) => new MetadataInput(compilation.RemoveAllSyntaxTrees(),
+                [.. ResolverConfiguration.Read(compilation, token).Select(config => config with { Location = Location.None })]))
+            .WithComparer(MetadataInputComparer.Instance)
+            .Select(static (input, token) => PropertyMatching.Metadata(input, token))
+            .WithTrackingName("MetadataTypes");
 
-        // Combine configs with all types
-        var combined = compilationData.Combine(allTypes.Collect());
-
-        // Generate the resolvers
-        context.RegisterSourceOutput(combined, (ctx, source) =>
+        var defaults = context.AnalyzerConfigOptionsProvider
+            .Select(static (options, _) => ResolverConfiguration.Defaults(options.GlobalOptions));
+        var settings = context.CompilationProvider.Select(static (compilation, token) => ResolverConfiguration.Settings(compilation, token))
+            .WithComparer(SettingsComparer.Instance).WithTrackingName("Configuration");
+        var locations = context.CompilationProvider.Select(static (compilation, token) => ResolverConfiguration.Read(compilation, token));
+        var input = settings.Combine(defaults).Combine(sourceTypes.Collect()).Combine(metadataTypes);
+        var output = input.Select(static (value, token) =>
         {
-            var ((configs, rootNamespace, hasResolverRegistry), types) = source;
-            GenerateResolvers(ctx, configs, types, rootNamespace, hasResolverRegistry);
+            var (((generationSettings, projectDefaults), source), metadata) = value;
+            token.ThrowIfCancellationRequested();
+            return Generate(generationSettings, projectDefaults, source.AddRange(metadata), token);
+        }).WithTrackingName("ResolverModel");
+
+        // Diagnostics retain current source locations; source text is separately
+        // value-equatable so unrelated method edits do not regenerate resolvers.
+        context.RegisterSourceOutput(output.Combine(locations), static (production, value) =>
+        {
+            var (result, configs) = value;
+            foreach (var diagnostic in result.Diagnostics)
+            {
+                var location = configs.FirstOrDefault(config => config.PropertyName == diagnostic.Property)?.Location ?? Location.None;
+                production.ReportDiagnostic(Diagnostic.Create(diagnostic.Rule, location, diagnostic.Arguments.ToArray()));
+            }
         });
+        var files = output.SelectMany(static (result, _) => result.Files)
+            .WithComparer(EqualityComparer<GeneratedFile>.Default).WithTrackingName("ResolverSources");
+        context.RegisterSourceOutput(files, static (production, file) =>
+            production.AddSource(file.HintName, SourceText.From(file.Code, Encoding.UTF8)));
     }
 
-    private static string GetRootNamespace(Compilation compilation)
+    private static GenerationOutput Generate(
+        GenerationSettings settings, ProjectDefaults defaults, ImmutableArray<TypeCandidate> types,
+        System.Threading.CancellationToken token)
     {
-        // Try to get from assembly name first
-        var assemblyName = compilation.AssemblyName;
-        if (!string.IsNullOrEmpty(assemblyName))
-        {
-            return assemblyName!;
-        }
-
-        // Fallback: try to infer from the most common root namespace of types
-        var namespaces = compilation.Assembly
-            .GlobalNamespace
-            .GetNamespaceMembers()
-            .Where(ns => !ns.IsGlobalNamespace &&
-                         !ns.Name.StartsWith("System", StringComparison.Ordinal) &&
-                         !ns.Name.StartsWith("Microsoft", StringComparison.Ordinal))
-            .Select(ns => ns.Name)
-            .ToList();
-
-        return namespaces.Count switch
-        {
-            > 0 => namespaces[0],
-            _ => "Generated"
-        };
-    }
-
-    private static ImmutableArray<ResolverConfig> GetResolverConfigs(Compilation compilation)
-    {
-        var configs = new List<ResolverConfig>();
-
-        // Check the current assembly for attributes
-        CollectConfigsFromAssembly(compilation.Assembly, configs);
-
-        // Check referenced assemblies for attributes (e.g., when the attribute is
-        // defined in a package that the consuming project references)
-        foreach (var referencedAssembly in compilation.SourceModule.ReferencedAssemblySymbols)
-        {
-            CollectConfigsFromAssembly(referencedAssembly, configs);
-        }
-
-        return [.. configs];
-    }
-
-    private static void CollectConfigsFromAssembly(IAssemblySymbol assembly, List<ResolverConfig> configs)
-    {
-        foreach (var attribute in assembly.GetAttributes())
-        {
-            if (attribute.AttributeClass?.ToDisplayString() != AttributeFullName)
-            {
-                continue;
-            }
-
-            var propertyName = attribute.ConstructorArguments[0].Value as string;
-            if (string.IsNullOrEmpty(propertyName))
-            {
-                continue;
-            }
-
-            var config = new ResolverConfig
-            {
-                PropertyName = propertyName!
-            };
-
-            foreach (var namedArg in attribute.NamedArguments)
-            {
-                switch (namedArg.Key)
-                {
-                    case "IncludeNamespaces":
-                        config.IncludeNamespaces = [.. namedArg.Value.Values
-                            .Select(v => v.Value as string)
-                            .Where(v => v != null)
-                            .Cast<string>()];
-                        break;
-
-                    case "ExcludeNamespaces":
-                        config.ExcludeNamespaces = [.. namedArg.Value.Values
-                            .Select(v => v.Value as string)
-                            .Where(v => v != null)
-                            .Cast<string>()];
-                        break;
-
-                }
-            }
-
-            configs.Add(config);
-        }
-    }
-
-    private static List<TypeInfo> GetAllNamedTypes(Compilation compilation)
-    {
-        var types = new List<TypeInfo>();
-        CollectTypes(compilation.GlobalNamespace, types);
-        return types;
-    }
-
-    private static void CollectTypes(INamespaceSymbol ns, List<TypeInfo> types)
-    {
-        foreach (var type in ns.GetTypeMembers())
-        {
-            // Skip generic types - they cannot be pattern-matched in switch expressions
-            if (type.IsGenericType)
-            {
-                continue;
-            }
-
-            if (type is { TypeKind: TypeKind.Class or TypeKind.Struct, DeclaredAccessibility: Accessibility.Public })
-            {
-                var properties = type.GetMembers()
-                    .OfType<IPropertySymbol>()
-                    .Where(p => p.DeclaredAccessibility == Accessibility.Public && p.GetMethod != null)
-                    .Select(p => new PropertyInfo(p.Name, IsNullableProperty(p)))
-                    .ToImmutableArray();
-
-                if (properties.Length > 0)
-                {
-                    types.Add(new TypeInfo(
-                        type.ToDisplayString(),
-                        type.ContainingNamespace?.ToDisplayString() ?? "",
-                        properties));
-                }
-            }
-
-            // Recurse into nested types
-            foreach (var nested in type.GetTypeMembers())
-            {
-                CollectNestedTypes(nested, types);
-            }
-        }
-
-        foreach (var childNs in ns.GetNamespaceMembers())
-        {
-            CollectTypes(childNs, types);
-        }
-    }
-
-    private static void CollectNestedTypes(INamedTypeSymbol type, List<TypeInfo> types)
-    {
-        // Skip generic types - they cannot be pattern-matched in switch expressions
-        if (type.IsGenericType)
-        {
-            return;
-        }
-
-        if (type.TypeKind is TypeKind.Class or TypeKind.Struct)
-        {
-            var properties = type.GetMembers()
-                .OfType<IPropertySymbol>()
-                .Where(p => p.DeclaredAccessibility == Accessibility.Public && p.GetMethod != null)
-                .Select(p => new PropertyInfo(p.Name, IsNullableProperty(p)))
-                .ToImmutableArray();
-
-            if (properties.Length > 0)
-            {
-                types.Add(new TypeInfo(
-                    type.ToDisplayString(),
-                    type.ContainingNamespace?.ToDisplayString() ?? "",
-                    properties));
-            }
-        }
-
-        foreach (var nested in type.GetTypeMembers())
-        {
-            CollectNestedTypes(nested, types);
-        }
-    }
-
-    private static void GenerateResolvers(
-        SourceProductionContext context,
-        ImmutableArray<ResolverConfig> configs,
-        ImmutableArray<TypeInfo> allTypes,
-        string rootNamespace,
-        bool hasResolverRegistry)
-    {
-        if (configs.Length == 0)
-        {
-            return;
-        }
-
-        var generatedNamespace = $"{rootNamespace}";
-
-        // Deduplicate configs by property name (take first occurrence only)
-        // The analyzer will report diagnostics for duplicates
-        var deduplicatedConfigs = configs
-            .GroupBy(c => c.PropertyName, StringComparer.OrdinalIgnoreCase)
-            .Select(g => g.First())
-            .ToList();
-
-        // Group by resolver class name
-        var byClassName = deduplicatedConfigs
-            .GroupBy(c => c.ResolverClassName ?? "PropertyResolversTest")
-            .ToList();
-
-        foreach (var group in byClassName)
-        {
-            var className = group.Key;
-            var methods = new StringBuilder();
-
-            foreach (var config in group)
-            {
-
-                var matches = allTypes
-                    .Where(t => ShouldIncludeType(t, config))
-                    .SelectMany(t => t.Properties
-                        .Where(p => p.Name.Equals(config.PropertyName, StringComparison.OrdinalIgnoreCase))
-                        .Select(p => (TypeFullName: t.FullName, PropertyName: p.Name, p.IsNullable)))
-                    .ToList();
-
-                const string returnType = "string?";
-                var methodName = $"Get{config.PropertyName}";
-
-                methods.AppendLine($"    public static {returnType} {methodName}(object? obj) => obj switch");
-                methods.AppendLine("    {");
-
-                foreach (var (typeName, propertyName, isNullable) in matches)
-                {
-                    var toStringCall = isNullable ? "?.ToString()" : ".ToString()";
-                    methods.AppendLine($"        global::{typeName} x => x.{propertyName}{toStringCall},");
-                }
-
-                methods.AppendLine("        _ => null");
-                methods.AppendLine("    };");
-                methods.AppendLine();
-            }
-
-            var code = $$"""
-                         // <auto-generated/>
-                         #nullable enable
-
-                         namespace {{generatedNamespace}};
-
-                         public static class {{className}}
-                         {
-                         {{methods}}}
-
-                         """;
-
-            context.AddSource($"{className}.g.cs", SourceText.From(code, Encoding.UTF8));
-        }
-
-        if (hasResolverRegistry)
-        {
-            var registrations = BuildRegistrationCalls(deduplicatedConfigs, generatedNamespace);
-            var registrationCode = $$"""
-                                   // <auto-generated/>
-                                   #nullable enable
-
-                                   using System.Runtime.CompilerServices;
-
-                                   namespace {{generatedNamespace}};
-
-                                   [CompilerGenerated]
-                                   internal static class PropertyResolverModuleInitializer
-                                   {
-                                       [ModuleInitializer]
-                                       internal static void Initialize()
-                                       {
-                                   {{registrations}}
-                                       }
-                                   }
-
-                                   """;
-
-            context.AddSource("PropertyResolverRegistration.g.cs", SourceText.From(registrationCode, Encoding.UTF8));
-        }
-    }
-
-    private static string BuildRegistrationCalls(IEnumerable<ResolverConfig> configs, string generatedNamespace)
-    {
-        var builder = new StringBuilder();
-
+        var files = ImmutableArray.CreateBuilder<GeneratedFile>();
+        var diagnostics = ImmutableArray.CreateBuilder<PendingDiagnostic>();
+        var plans = new List<ResolverPlan>();
+        var configs = settings.Configs;
+        var sourceTypeNames = new HashSet<string>(settings.Types.Select(name => "global::" + ResolverConfiguration.EscapeNamespace(name)), StringComparer.Ordinal);
+        // Cached metadata models use a source-less compilation. Apply the current
+        // source-name overlay here so a local declaration cannot change the binding
+        // of a cached global:: root or public result type.
+        types = [.. types.Where(type => type.IsSource || !sourceTypeNames.Any(name =>
+            type.FullName == name || type.FullName.StartsWith(name + ".", StringComparison.Ordinal)))];
+        bool UnnameableResult(ResolverArm arm) => !arm.Property.Nameable || !arm.IsSource &&
+            SyntaxFactory.ParseTypeName(arm.Property.TypeName).DescendantNodesAndSelf()
+                .Where(node => node is QualifiedNameSyntax or AliasQualifiedNameSyntax)
+                .Any(node => sourceTypeNames.Contains(node.ToString()));
         foreach (var config in configs)
         {
-            var className = config.ResolverClassName;
-            var methodName = $"Get{config.PropertyName}";
-
-            builder.Append("            global::PropertyResolvers.Attributes.PropertyResolverRegistry.Register(\"")
-                .Append(EscapeStringLiteral(config.PropertyName))
-                .Append("\", global::")
-                .Append(generatedNamespace)
-                .Append('.')
-                .Append(className)
-                .Append('.')
-                .Append(methodName)
-                .AppendLine(");");
-        }
-
-        return builder.ToString().TrimEnd();
-    }
-
-    private static string EscapeStringLiteral(string value) => value
-        .Replace("\\", "\\\\")
-        .Replace("\"", "\\\"");
-
-    private static bool IsNullableProperty(IPropertySymbol property)
-    {
-        // Nullable value type (e.g., int?, Guid?)
-        if (property.Type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T)
-        {
-            return true;
-        }
-
-        // Nullable reference type (e.g., string?, object?)
-        if (property.NullableAnnotation == NullableAnnotation.Annotated)
-        {
-            return true;
-        }
-
-        return false;
-    }
-
-    private static bool ShouldIncludeType(TypeInfo type, ResolverConfig config)
-    {
-        var ns = type.Namespace;
-
-        // If includes specified, namespace must match one
-        if (config.IncludeNamespaces is { Length: > 0 })
-        {
-            if (!config.IncludeNamespaces.Any(inc => ns.StartsWith(inc, StringComparison.Ordinal)))
+            token.ThrowIfCancellationRequested();
+            void Report(DiagnosticDescriptor rule, params object[] args) => diagnostics.Add(AtConfig(rule, config, args));
+            if (!ResolverConfiguration.Path(config.PropertyName) || config.Aliases.Any(alias => !ResolverConfiguration.Path(alias)))
             {
-                return false;
+                Report(GeneratorDiagnostics.InvalidPropertyName,
+                    !ResolverConfiguration.Path(config.PropertyName) ? config.PropertyName : config.Aliases.First(alias => !ResolverConfiguration.Path(alias)));
+                continue;
+            }
+            if (!ResolverConfiguration.Identifier(config.ClassName))
+            {
+                Report(GeneratorDiagnostics.InvalidPropertyName, config.ClassName);
+                continue;
+            }
+            if (config.ClassName is "TryGet" or "FormatValue" or "__GetString" || config.ClassName == "Get" + config.MethodSuffix)
+            {
+                Report(GeneratorDiagnostics.GeneratedNameCollision, config.ClassName);
+                continue;
+            }
+            if (defaults.Problem is not null || (config.Output ?? defaults.Output) is not (0 or 1))
+            {
+                Report(GeneratorDiagnostics.InvalidConfiguration, defaults.Problem ?? "Output must be String or Typed");
+                continue;
+            }
+
+            var ns = config.Namespace ?? defaults.Namespace ?? settings.AssemblyName;
+            if (!ResolverConfiguration.Path(ns))
+            {
+                Report(GeneratorDiagnostics.InvalidNamespace, ns);
+                continue;
+            }
+            var runtime = config.RegisterRuntime ?? defaults.RegisterRuntime;
+            var collision = settings.Collision(ns, config.ClassName);
+            if (collision is not null || config.ClassName is "PropertyResolverDispatch" or "PropertyResolverModuleInitializer")
+            {
+                Report(GeneratorDiagnostics.GeneratedNameCollision, collision ?? ns + "." + config.ClassName);
+                continue;
+            }
+
+            var all = types.Select(type => (Type: type, Match: type.Matches.FirstOrDefault(match => match.ConfigKey == config.MatchKey)))
+                .Where(pair => pair.Match is not null).ToArray();
+            var included = all.Where(pair => ResolverConfiguration.Include(pair.Type.Namespace, config)).ToArray();
+            var ambiguous = included.Where(pair => pair.Type.Eligible && (pair.Match!.Properties.Length > 1 ||
+                pair.Match.Problem?.StartsWith("Ambiguous", StringComparison.Ordinal) == true)).ToArray();
+            if (ambiguous.Length > 0)
+            {
+                foreach (var pair in ambiguous)
+                {
+                    Report(GeneratorDiagnostics.AmbiguousMatch, config.PropertyName, pair.Type.FullName);
+                }
+                continue;
+            }
+
+            var matches = included.Where(pair => pair.Type.Eligible && pair.Match!.Properties.Length == 1)
+                .GroupBy(pair => pair.Type.FullName, StringComparer.Ordinal).Select(group => group.First())
+                .OrderByDescending(pair => pair.Type.Depth).ThenBy(pair => pair.Type.FullName, StringComparer.Ordinal)
+                .Select(pair => new ResolverArm(pair.Type.FullName, pair.Match!.Properties[0], pair.Type.IsSource)).ToImmutableArray();
+            var conflictingFilters = config.Includes.Length > 0 && config.Includes.All(include =>
+                config.Excludes.Any(exclude => include.StartsWith(exclude, StringComparison.Ordinal)));
+            if (matches.Length == 0)
+            {
+                var unsupported = included.FirstOrDefault(pair => !pair.Type.Eligible || pair.Match!.Problem is not null);
+                if (conflictingFilters)
+                {
+                    Report(GeneratorDiagnostics.ExcludedMatches, config.PropertyName);
+                }
+                else if (unsupported.Type is not null)
+                {
+                    Report(GeneratorDiagnostics.UnsupportedMatch, config.PropertyName, unsupported.Type.FullName,
+                        unsupported.Match!.Problem ?? "Type cannot participate in an object-based resolver");
+                }
+                else
+                {
+                    Report(all.Any(pair => pair.Type.Eligible && pair.Match!.Properties.Length > 0)
+                        ? GeneratorDiagnostics.ExcludedMatches : GeneratorDiagnostics.NoMatches, config.PropertyName);
+                }
+            }
+
+            var typed = (config.Output ?? defaults.Output) == 1;
+            if (typed && (matches.Length == 0 || matches.Any(UnnameableResult) ||
+                          matches.Select(arm => arm.Property.TypeName).Distinct(StringComparer.Ordinal).Count() != 1))
+            {
+                Report(GeneratorDiagnostics.IncompatibleTypes, config.PropertyName,
+                    matches.Length == 0 ? "no eligible property type" : matches.Any(UnnameableResult)
+                        ? "property type is not uniquely accessible through global::" : string.Join(", ", matches.Select(arm => arm.Property.TypeName).Distinct(StringComparer.Ordinal)));
+                continue;
+            }
+            plans.Add(new ResolverPlan(config, ns, typed, runtime, matches));
+        }
+
+        // Two otherwise valid configurations may choose the same generated name.
+        var duplicates = new HashSet<ResolverPlan>(plans.GroupBy(plan => plan.Namespace + "." + plan.Config.ClassName, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1).SelectMany(group => group));
+        var generatedTypes = plans.Select(plan => plan.Namespace + "." + plan.Config.ClassName)
+            .Concat(plans.Select(plan => plan.Namespace + ".PropertyResolverDispatch"))
+            .Concat(plans.Where(plan => plan.RegisterRuntime).Select(plan => plan.Namespace + ".PropertyResolverModuleInitializer"))
+            .Distinct(StringComparer.Ordinal).ToArray();
+        foreach (var name in generatedTypes.Where(name => plans.Any(plan => plan.Namespace == name ||
+                     plan.Namespace.StartsWith(name + ".", StringComparison.Ordinal))))
+        {
+            foreach (var plan in plans.Where(plan => plan.Namespace == name || plan.Namespace.StartsWith(name + ".", StringComparison.Ordinal) ||
+                         plan.Namespace + "." + plan.Config.ClassName == name ||
+                         plan.Namespace + ".PropertyResolverDispatch" == name || plan.Namespace + ".PropertyResolverModuleInitializer" == name))
+            {
+                duplicates.Add(plan);
             }
         }
-
-        // If excludes specified, namespace must not match any
-        if (config.ExcludeNamespaces is { Length: > 0 })
+        foreach (var plan in duplicates)
         {
-            if (config.ExcludeNamespaces.Any(exc => ns.StartsWith(exc, StringComparison.Ordinal)))
+            diagnostics.Add(AtConfig(GeneratorDiagnostics.GeneratedNameCollision, plan.Config,
+                plan.Namespace + "." + plan.Config.ClassName));
+        }
+        plans.RemoveAll(duplicates.Contains);
+        foreach (var plan in plans)
+        {
+            files.Add(new GeneratedFile(plan.Namespace + "." + plan.Config.ClassName + ".g.cs", ResolverWriter.Resolver(plan)));
+        }
+        foreach (var group in plans.GroupBy(plan => plan.Namespace, StringComparer.Ordinal))
+        {
+            var members = group.ToImmutableArray();
+            var config = members[0].Config;
+            var dispatchCollision = settings.Collision(group.Key, "PropertyResolverDispatch");
+            if (dispatchCollision is null)
             {
-                return false;
+                files.Add(new GeneratedFile(group.Key + ".PropertyResolverDispatch.g.cs", ResolverWriter.Dispatch(group.Key, members)));
+            }
+            else
+            {
+                diagnostics.Add(AtConfig(GeneratorDiagnostics.GeneratedNameCollision, config, dispatchCollision));
+            }
+            var registrations = members.Where(plan => plan.RegisterRuntime).ToImmutableArray();
+            if (registrations.Length > 0)
+            {
+                var initializerCollision = settings.Collision(group.Key, "PropertyResolverModuleInitializer");
+                if (initializerCollision is null)
+                {
+                    files.Add(new GeneratedFile(group.Key + ".PropertyResolverRegistration.g.cs", ResolverWriter.Registration(group.Key, registrations)));
+                }
+                else
+                {
+                    diagnostics.Add(AtConfig(GeneratorDiagnostics.GeneratedNameCollision, config, initializerCollision));
+                }
             }
         }
-
-        return true;
+        if (plans.Any(plan => plan.RegisterRuntime) &&
+            !settings.HasModuleInitializer)
+        {
+            files.Add(new GeneratedFile("ModuleInitializerAttribute.g.cs", ResolverWriter.ModuleInitializerAttribute));
+        }
+        return new GenerationOutput(files.ToImmutable(), diagnostics.ToImmutable());
     }
 
-    private sealed class ResolverConfig
-    {
-        public string PropertyName { get; set; } = null!;
-        public string[]? IncludeNamespaces { get; set; }
-        public string[]? ExcludeNamespaces { get; set; }
-        public string ResolverClassName => $"{PropertyName}Resolver";
-    }
-
-    private record struct PropertyInfo(string Name, bool IsNullable);
-
-    private record struct TypeInfo(string FullName, string Namespace, ImmutableArray<PropertyInfo> Properties);
+    private static PendingDiagnostic AtConfig(DiagnosticDescriptor rule, ResolverConfig config, params object[] args) =>
+        new(rule, config.PropertyName, [.. args]);
 }

@@ -1,55 +1,46 @@
-using System;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.CodeAnalysis;
-using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 using PropertyResolvers.Generators;
+using PropertyResolvers.Tests.Utils;
 using Xunit;
 
 namespace PropertyResolvers.Tests;
 
 public class DuplicatePropertyResolverAnalyzerTests
 {
-    private static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsAsync(string source)
+    [Fact]
+    public async Task DiagnosticWhenDuplicatesAreInDifferentFiles()
     {
-        var syntaxTree = CSharpSyntaxTree.ParseText(source);
+        var diagnostics = await GetDiagnosticsAsync(
+            "[assembly: PropertyResolvers.Attributes.GeneratePropertyResolver(\"AccountId\")]",
+            "[assembly: PropertyResolvers.Attributes.GeneratePropertyResolver(\"accountid\")]");
 
-        // Include all currently loaded assemblies to ensure proper symbol resolution
-        // This mimics how the IDE has access to all project references
-        var references = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic && !string.IsNullOrEmpty(a.Location))
-            .Select(a => MetadataReference.CreateFromFile(a.Location))
-            .Cast<MetadataReference>()
-            .ToList();
+        var diagnostic = Assert.Single(diagnostics);
+        Assert.Equal("Source1.cs", diagnostic.Location.SourceTree?.FilePath);
+        Assert.Contains("AccountId", diagnostic.GetMessage(CultureInfo.InvariantCulture));
+    }
 
-        // Ensure our attribute assembly is included
-        var attributeAssemblyLocation = typeof(Attributes.GeneratePropertyResolverAttribute).Assembly.Location;
-        if (!references.Any(r => r.Display == attributeAssemblyLocation))
-        {
-            references.Add(MetadataReference.CreateFromFile(attributeAssemblyLocation));
-        }
+    [Fact]
+    public async Task NamedConstructorArgumentIsRecognized()
+    {
+        var diagnostics = await GetDiagnosticsAsync("""
+            using PropertyResolvers.Attributes;
+            [assembly: GeneratePropertyResolver("AccountId")]
+            [assembly: GeneratePropertyResolver(propertyName: "AccountId", IncludeNamespaces = new[] { "Example" })]
+            """);
 
-        var compilation = CSharpCompilation.Create(
-            "TestAssembly",
-            [syntaxTree],
-            references,
-            new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary));
+        Assert.Single(diagnostics);
+    }
 
-        // Verify compilation has no errors - if it does, symbol resolution won't work properly
-        var compilationErrors = compilation.GetDiagnostics()
-            .Where(d => d.Severity == DiagnosticSeverity.Error)
-            .ToList();
-
-        if (compilationErrors.Count > 0)
-        {
-            var errorMessages = string.Join(Environment.NewLine, compilationErrors.Select(e => e.ToString()));
-            throw new InvalidOperationException(
-                $"Test compilation has errors. Symbol resolution will not work correctly:{Environment.NewLine}{errorMessages}");
-        }
+    private static async Task<ImmutableArray<Diagnostic>> GetDiagnosticsAsync(params string[] sources)
+    {
+        var compilation = CompilationTestHelper.CreateCompilation(sources);
+        CompilationTestHelper.AssertNoErrors(compilation.GetDiagnostics());
 
         var analyzer = new DuplicatePropertyResolverAnalyzer();
         var analyzers = ImmutableArray.Create<DiagnosticAnalyzer>(analyzer);
@@ -57,6 +48,7 @@ public class DuplicatePropertyResolverAnalyzerTests
         var compilationWithAnalyzers = compilation.WithAnalyzers(analyzers);
         var diagnostics = await compilationWithAnalyzers.GetAnalyzerDiagnosticsAsync(CancellationToken.None);
 
+        Assert.DoesNotContain(diagnostics, diagnostic => diagnostic.Id == "AD0001");
         return [.. diagnostics.Where(d => d.Id == DuplicatePropertyResolverAnalyzer.DiagnosticId)];
     }
 

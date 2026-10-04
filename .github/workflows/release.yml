@@ -1,8 +1,19 @@
 name: Release
 
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Explicit SemVer version (for example 2.5.0 or 2.5.0-rc.1)'
+        required: true
+        type: string
+
+concurrency:
+  group: propertyresolvers-release
+  cancel-in-progress: false
+
+permissions:
+  contents: read
 
 jobs:
   build-test-release:
@@ -10,100 +21,82 @@ jobs:
     permissions:
       contents: write
       id-token: write
-
+    env:
+      VERSION: ${{ inputs.version }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0 # Full history for versioning
+          fetch-depth: 0
+
+      - name: Validate release request
+        shell: bash
+        run: |
+          [[ "$GITHUB_REF" == 'refs/heads/main' ]] || { echo 'Release from main only'; exit 1; }
+          [[ "$VERSION" =~ ^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$ ]] || { echo 'Invalid version'; exit 1; }
+          if git rev-parse --verify "refs/tags/v$VERSION" >/dev/null 2>&1; then
+            echo 'Version already tagged'; exit 1
+          fi
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           global-json-file: global.json
+          dotnet-version: 8.0.x
 
-      - name: Restore dependencies
+      - name: Restore
         run: dotnet restore
-
       - name: Build
         run: dotnet build --no-restore --configuration Release
-
       - name: Test
         run: dotnet test --no-build --configuration Release --verbosity normal
+      - name: Package and Native AOT validation
+        shell: pwsh
+        run: ./scripts/Test-Package.ps1 -WorkDirectory "$env:RUNNER_TEMP/PropertyResolvers" -PublishAot
 
-      - name: Determine version
-        id: version
+      - name: Pack release artifacts
+        shell: bash
         run: |
-          # Get the latest tag, default to 0.0.0 if none exists
-          LATEST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          LATEST_VERSION=${LATEST_TAG#v}
-          
-          # Split version into parts
-          IFS='.' read -r MAJOR MINOR PATCH <<< "$LATEST_VERSION"
-          
-          # Increment patch version
-          PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${PATCH}"
-          
-          echo "version=$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "tag=v$NEW_VERSION" >> $GITHUB_OUTPUT
-          echo "New version: $NEW_VERSION"
+          dotnet pack src/PropertyResolvers.Attributes/PropertyResolvers.Attributes.csproj -c Release -o artifacts "-p:Version=$VERSION" "-p:PackageVersion=$VERSION"
+          dotnet pack src/PropertyResolvers.Generators/PropertyResolvers.Generators.csproj -c Release -o artifacts "-p:Version=$VERSION" "-p:PackageVersion=$VERSION"
 
-      - name: Pack PropertyResolvers
-        run: |
-          dotnet pack src/PropertyResolvers.Generators/PropertyResolvers.Generators.csproj \
-            --configuration Release \
-            -p:PackageVersion=${{ steps.version.outputs.version }}
+      - name: Preserve release artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: packages-${{ inputs.version }}
+          path: artifacts/*.nupkg
+          if-no-files-found: error
 
-      - name: Pack PropertyResolvers.Attributes
-        run: |
-          dotnet pack src/PropertyResolvers.Attributes/PropertyResolvers.Attributes.csproj \
-            --no-build \
-            --configuration Release \
-            -p:PackageVersion=${{ steps.version.outputs.version }}
+      - name: Validate exact release packages
+        shell: pwsh
+        run: ./scripts/Test-Package.ps1 -WorkDirectory "$env:RUNNER_TEMP/PropertyResolversRelease" -PackageVersion "$env:VERSION" -PackageSource "$env:GITHUB_WORKSPACE/artifacts" -PublishAot
 
-      - name: NuGet login (OIDC → temp API key)
+      - name: NuGet login
         uses: NuGet/login@v1
         id: login
         with:
           user: tombiddulph
-
-      - name: Push to NuGet
+      - name: Publish packages
+        shell: bash
+        env:
+          NUGET_API_KEY: ${{ steps.login.outputs.NUGET_API_KEY }}
         run: |
-          dotnet nuget push src/PropertyResolvers.Generators/bin/Release/PropertyResolvers.${{ steps.version.outputs.version }}.nupkg \
-            --source https://api.nuget.org/v3/index.json \
-            --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
-            --skip-duplicate
-          
-          dotnet nuget push src/PropertyResolvers.Attributes/bin/Release/PropertyResolvers.Attributes.${{ steps.version.outputs.version }}.nupkg \
-            --source https://api.nuget.org/v3/index.json \
-            --api-key ${{ steps.login.outputs.NUGET_API_KEY }} \
-            --skip-duplicate
-
-      - name: Create Git tag
+          dotnet nuget push "artifacts/PropertyResolvers.Attributes.$VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY"
+          dotnet nuget push "artifacts/PropertyResolvers.$VERSION.nupkg" --source https://api.nuget.org/v3/index.json --api-key "$NUGET_API_KEY"
+      - name: Tag
+        shell: bash
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ steps.version.outputs.tag }}
-          git push origin ${{ steps.version.outputs.tag }}
-
-      - name: Create GitHub Release
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          git tag "v$VERSION"
+          git push origin "v$VERSION"
+      - name: GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ steps.version.outputs.tag }}
-          name: Release ${{ steps.version.outputs.version }}
-          body: |
-            ## PropertyResolvers ${{ steps.version.outputs.version }}
-            
-            ### Installation
-            ```bash
-            dotnet add package PropertyResolvers --version ${{ steps.version.outputs.version }}
-            ```
-            
-            ### Packages
-            - [PropertyResolvers](https://www.nuget.org/packages/PropertyResolvers/${{ steps.version.outputs.version }})
-            - [PropertyResolvers.Attributes](https://www.nuget.org/packages/PropertyResolvers.Attributes/${{ steps.version.outputs.version }})
-          files: |
-            src/PropertyResolvers.Generators/bin/Release/PropertyResolvers.${{ steps.version.outputs.version }}.nupkg
-            src/PropertyResolvers.Attributes/bin/Release/PropertyResolvers.Attributes.${{ steps.version.outputs.version }}.nupkg
+          tag_name: v${{ inputs.version }}
+          name: PropertyResolvers ${{ inputs.version }}
+          prerelease: ${{ contains(inputs.version, '-') }}
+          make_latest: ${{ contains(inputs.version, '-') && 'false' || 'true' }}
+          body_path: docs/releases/2.5.0.md
           generate_release_notes: true
+          files: artifacts/*.nupkg
